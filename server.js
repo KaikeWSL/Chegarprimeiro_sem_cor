@@ -528,6 +528,76 @@ app.post('/api/trocar-senha', async (req, res) => {
   }
 });
 
+// --- Recuperação de senha para síndico ---
+const codigosRecuperacaoSenhaSindico = {};
+
+// Endpoint para buscar e-mail mascarado por documento
+app.post('/api/recuperar-email-sindico', async (req, res) => {
+  const { documento } = req.body;
+  if (!documento) return res.status(400).json({ success: false, error: 'Documento não informado' });
+  try {
+    const result = await executarQuery('SELECT email FROM sindico WHERE documento = $1', [documento]);
+    if (result.rows.length === 0 || !result.rows[0].email) {
+      return res.status(404).json({ success: false, error: 'E-mail não encontrado para este documento' });
+    }
+    const email = result.rows[0].email;
+    // Mascara o e-mail (ex: si****@gmail.com)
+    const [user, domain] = email.split('@');
+    const maskedUser = user.length <= 2 ? user[0] + '***' : user.substring(0, 2) + '*'.repeat(user.length - 2);
+    const maskedEmail = maskedUser + '@' + domain;
+    res.json({ success: true, email: maskedEmail, realEmail: email });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Endpoint para enviar código de verificação para o e-mail do síndico
+app.post('/api/enviar-codigo-recuperacao-sindico', async (req, res) => {
+  const { documento } = req.body;
+  if (!documento) return res.status(400).json({ success: false, error: 'Documento não informado' });
+  try {
+    const result = await executarQuery('SELECT email FROM sindico WHERE documento = $1', [documento]);
+    if (result.rows.length === 0 || !result.rows[0].email) {
+      return res.status(404).json({ success: false, error: 'E-mail não encontrado para este documento' });
+    }
+    const email = result.rows[0].email;
+    // Gera código de 6 dígitos
+    const codigo = Math.floor(100000 + Math.random() * 900000).toString();
+    codigosRecuperacaoSenhaSindico[documento] = { codigo, email, criadoEm: Date.now() };
+    await transporter.sendMail({
+      from: `Chegar Primeiro <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: 'Código de recuperação de senha',
+      text: `Seu código de recuperação de senha é: ${codigo}`,
+      html: `<p>Seu código de recuperação de senha é: <b>${codigo}</b></p>`
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Endpoint para validar código e trocar senha do síndico
+app.post('/api/trocar-senha-sindico', async (req, res) => {
+  const { documento, codigo, novaSenha } = req.body;
+  if (!documento || !codigo || !novaSenha) {
+    return res.status(400).json({ success: false, error: 'Dados incompletos' });
+  }
+  const registro = codigosRecuperacaoSenhaSindico[documento];
+  if (!registro || registro.codigo !== codigo) {
+    return res.status(400).json({ success: false, error: 'Código inválido' });
+  }
+  // Código válido, troca a senha
+  try {
+    const senhaHash = await bcrypt.hash(novaSenha, 10);
+    await executarQuery('UPDATE sindico SET senha = $1 WHERE documento = $2', [senhaHash, documento]);
+    delete codigosRecuperacaoSenhaSindico[documento];
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Endpoint para cadastro de empreendimento (síndico)
 app.post('/api/empreendimento', async (req, res) => {
   const {
@@ -664,6 +734,53 @@ app.post('/api/empreendimento-construtora', upload.fields([
   } catch (err) {
     console.error('[ERRO] Falha ao salvar empreendimento construtora:', err);
     res.status(500).json({ success: false, error: 'Erro ao salvar empreendimento' });
+  }
+});
+
+// Endpoint para cadastro de síndico
+app.post('/api/sindico', async (req, res) => {
+  const { nome, documento, email, telefone, empreendimentos, senha } = req.body;
+  if (!nome || !documento || !email || !telefone || !empreendimentos || !senha) {
+    return res.status(400).json({ success: false, error: 'Campos obrigatórios faltando' });
+  }
+  try {
+    // Verifica duplicidade
+    const existe = await executarQuery('SELECT 1 FROM sindico WHERE documento = $1 OR email = $2', [documento, email]);
+    if (existe.rows.length > 0) {
+      return res.status(200).json({ success: false, error: 'Já existe cadastro com este documento ou email.' });
+    }
+    const senhaHash = await bcrypt.hash(senha, 10);
+    await executarQuery(
+      'INSERT INTO sindico (nome, documento, email, telefone, empreendimentos, senha) VALUES ($1, $2, $3, $4, $5, $6)',
+      [nome, documento, email, telefone, JSON.stringify(empreendimentos), senhaHash]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[ERRO] Falha ao cadastrar síndico:', err);
+    res.status(500).json({ success: false, error: 'Erro ao cadastrar síndico' });
+  }
+});
+
+// Endpoint de login de síndico
+app.post('/api/sindico-login', async (req, res) => {
+  const { documento, senha } = req.body;
+  if (!documento || !senha) {
+    return res.status(400).json({ success: false, error: 'Campos obrigatórios faltando' });
+  }
+  try {
+    const result = await executarQuery('SELECT * FROM sindico WHERE documento = $1', [documento]);
+    if (result.rows.length === 0) {
+      return res.status(200).json({ success: false, error: 'Documento ou senha inválidos' });
+    }
+    const sindico = result.rows[0];
+    const senhaOk = await bcrypt.compare(senha, sindico.senha);
+    if (!senhaOk) {
+      return res.status(200).json({ success: false, error: 'Documento ou senha inválidos' });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[ERRO] Falha no login de síndico:', err);
+    res.status(500).json({ success: false, error: 'Erro ao fazer login' });
   }
 });
 

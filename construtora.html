@@ -10,13 +10,32 @@
   <div class="container">
 
     <h2 style="text-align:center; margin-bottom: 18px;">Cadastro de Empreendimento (Construtora)</h2>
-    <form id="loginConstrutora" style="display:flex; flex-direction:column;">
-      <label>Usuário</label>
-      <input type="text" id="usuarioConstrutora" required autocomplete="username">
+    <div id="telaInicialConstrutora">
+      <h3 style="text-align:center; margin-bottom:18px;">Você já é cadastrado?</h3>
+      <div style="display:flex; gap:20px; justify-content:center; margin:24px 0;">
+        <button onclick="mostrarLoginConstrutora()" class="submit-btn">Sim</button>
+        <button onclick="mostrarCadastroConstrutora()" class="submit-btn">Não</button>
+      </div>
+    </div>
+    <form id="formLoginConstrutora" style="display:none; flex-direction:column;">
+      <label>CNPJ</label>
+      <input type="text" id="loginCnpjConstrutora" required autocomplete="username">
       <label>Senha</label>
-      <input type="password" id="senhaConstrutora" required autocomplete="current-password">
+      <input type="password" id="loginSenhaConstrutora" required autocomplete="current-password">
       <button type="submit" class="submit-btn" style="margin-top:18px;">Entrar</button>
-      <div id="erroLoginConstrutora" style="color:#ffd2d2; background:#a32c43; border-radius:6px; margin-top:10px; padding:6px 10px; display:none;">Usuário ou senha incorretos!</div>
+      <button type="button" onclick="voltarInicioConstrutora()" class="submit-btn" style="background:#eee; color:#333; margin-top:8px;">Voltar</button>
+      <div id="erroLoginConstrutora" style="color:#ffd2d2; background:#a32c43; border-radius:6px; margin-top:10px; padding:6px 10px; display:none;">CNPJ ou senha incorretos!</div>
+    </form>
+    <form id="formCadastroConstrutora" style="display:none; flex-direction:column;">
+      <label>Nome da construtora</label>
+      <input type="text" id="cadNomeConstrutora" required>
+      <label>CNPJ</label>
+      <input type="text" id="cadCnpjConstrutora" required>
+      <label>Senha</label>
+      <input type="password" id="cadSenhaConstrutora" required>
+      <button type="submit" class="submit-btn" style="margin-top:18px;">Cadastrar</button>
+      <button type="button" onclick="voltarInicioConstrutora()" class="submit-btn" style="background:#eee; color:#333; margin-top:8px;">Voltar</button>
+      <div id="erroCadastroConstrutora" style="color:#ffd2d2; background:#a32c43; border-radius:6px; margin-top:10px; padding:6px 10px; display:none;"></div>
     </form>
     <form id="formConstrutora" style="display:none; flex-direction:column;" enctype="multipart/form-data">
       <label>Construtora Responsável</label>
@@ -66,19 +85,83 @@
     <div class="notification" id="notificationConstrutora" style="display:none;"></div>
   </div>
   <script>
-    // Login simples
-    document.getElementById('loginConstrutora').addEventListener('submit', function(e) {
+    // Alternância de telas
+    function mostrarLoginConstrutora() {
+      document.getElementById('telaInicialConstrutora').style.display = 'none';
+      document.getElementById('formLoginConstrutora').style.display = 'flex';
+      document.getElementById('formCadastroConstrutora').style.display = 'none';
+      document.getElementById('formConstrutora').style.display = 'none';
+    }
+    function mostrarCadastroConstrutora() {
+      document.getElementById('telaInicialConstrutora').style.display = 'none';
+      document.getElementById('formLoginConstrutora').style.display = 'none';
+      document.getElementById('formCadastroConstrutora').style.display = 'flex';
+      document.getElementById('formConstrutora').style.display = 'none';
+    }
+    function voltarInicioConstrutora() {
+      document.getElementById('telaInicialConstrutora').style.display = 'block';
+      document.getElementById('formLoginConstrutora').style.display = 'none';
+      document.getElementById('formCadastroConstrutora').style.display = 'none';
+      document.getElementById('formConstrutora').style.display = 'none';
+    }
+    // Cadastro de construtora
+    document.getElementById('formCadastroConstrutora').addEventListener('submit', async function(e) {
       e.preventDefault();
-      var usuario = document.getElementById('usuarioConstrutora').value.trim();
-      var senha = document.getElementById('senhaConstrutora').value;
-      if (usuario === 'construtora' && senha === '123456') {
-        document.getElementById('loginConstrutora').style.display = 'none';
-        document.getElementById('formConstrutora').style.display = 'flex';
-        document.getElementById('erroLoginConstrutora').style.display = 'none';
-      } else {
-        document.getElementById('erroLoginConstrutora').style.display = 'block';
+      const erro = document.getElementById('erroCadastroConstrutora');
+      erro.style.display = 'none';
+      const dados = {
+        nome: document.getElementById('cadNomeConstrutora').value,
+        cnpj: document.getElementById('cadCnpjConstrutora').value,
+        senha: document.getElementById('cadSenhaConstrutora').value
+      };
+      try {
+        const resp = await fetch('https://chegarprimeiro-sem-cor.onrender.com/api/construtora', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dados)
+        });
+        const result = await resp.json();
+        if (result.success) {
+          alert('Cadastro realizado com sucesso! Faça login para continuar.');
+          voltarInicioConstrutora();
+        } else {
+          erro.innerText = result.error || 'Erro ao cadastrar.';
+          erro.style.display = 'block';
+        }
+      } catch (err) {
+        erro.innerText = 'Erro ao conectar com o servidor.';
+        erro.style.display = 'block';
       }
     });
+    // Login de construtora
+    document.getElementById('formLoginConstrutora').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const erro = document.getElementById('erroLoginConstrutora');
+      erro.style.display = 'none';
+      const dados = {
+        cnpj: document.getElementById('loginCnpjConstrutora').value,
+        senha: document.getElementById('loginSenhaConstrutora').value
+      };
+      try {
+        const resp = await fetch('https://chegarprimeiro-sem-cor.onrender.com/api/construtora-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dados)
+        });
+        const result = await resp.json();
+        if (result.success) {
+          document.getElementById('formLoginConstrutora').reset();
+          document.getElementById('formLoginConstrutora').style.display = 'none';
+          document.getElementById('formConstrutora').style.display = 'flex';
+        } else {
+          erro.style.display = 'block';
+        }
+      } catch (err) {
+        erro.style.display = 'block';
+      }
+    });
+    // Inicialização
+    voltarInicioConstrutora();
     // Máscara para CEP e telefone
     document.getElementById('cepEmpreendimento').addEventListener('input', function(e) {
       let v = this.value.replace(/\D/g, '');

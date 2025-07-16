@@ -8,122 +8,406 @@
 </head>
 <body>
   <div class="container">
-    <h2 style="text-align:center; margin-bottom: 18px;">Cadastro de imovel</h2>
-    <form id="loginSindico" style="display:flex; flex-direction:column;">
-      <label>Usuário</label>
-      <input type="text" id="usuarioLogin" required autocomplete="username">
-      <label>Senha</label>
-      <input type="password" id="senhaLogin" required autocomplete="current-password">
-      <button type="submit" class="submit-btn" style="margin-top:18px;">Entrar</button>
-      <div id="erroLogin" style="color:#ffd2d2; background:#a32c43; border-radius:6px; margin-top:10px; padding:6px 10px; display:none;">Usuário ou senha incorretos!</div>
-    </form>
-    <form id="formSindico" style="display:none; flex-direction:column;">
-      <label>Nome da empresa responsável</label>
-      <input type="text" id="empresaResponsavel" required>
-      <label>CNPJ da empresa</label>
-      <input type="text" id="cnpjEmpresa" required maxlength="18" placeholder="00.000.000/0000-00">
-      <label>Email do responsável pela empresa</label>
-      <input type="email" id="emailResponsavelEmpresa" required>
-      <label>Telefone do responsável pela empresa</label>
-      <input type="text" id="telefoneResponsavelEmpresa" required maxlength="15" placeholder="(00) 00000-0000">
-      <label>Nome do Empreendimento</label>
-      <input type="text" id="nomeEmpreendimento" required>
-      <label>Quantidade de torres</label>
-      <input type="number" id="qtdTorres" min="1" required>
-      <label>Quantidade de apartamentos por andar</label>
-      <input type="number" id="qtdAptosPorAndar" min="1" required>
-      <label>Quantidade de apartamentos total</label>
-      <input type="number" id="qtdAptosTotal" min="1" required>
-      <label>Responsável pelo local (síndico)</label>
-      <input type="text" id="nomeSindico" required>
-      <label>Email do responsável</label>
-      <input type="email" id="emailSindico" required>
-      <label>Telefone do responsável</label>
-      <input type="text" id="telefoneSindico" required maxlength="15" placeholder="(00) 00000-0000">
-      <label>Data que o empreendimento foi entregue</label>
-      <input type="date" id="dataEntrega" required>
-      <label>Existe rede de alguma operadora no local?</label>
-      <select id="existeRedeOperadora" required onchange="mostrarCampoOperadora()">
-        <option value="">Selecione</option>
-        <option value="sim">Sim</option>
-        <option value="nao">Não</option>
-      </select>
-      <div id="campoQualOperadora" style="display:none;">
-        <label>Qual operadora?</label>
-        <input type="text" id="qualOperadora">
+
+    <h2 style="text-align:center; margin-bottom: 18px;">Área do Síndico</h2>
+    <div id="telaInicial">
+      <h2>Você já é síndico cadastrado?</h2>
+      <div style="display:flex; gap:20px; justify-content:center; margin:24px 0;">
+        <button onclick="mostrarLogin()" class="submit-btn">Sim</button>
+        <button onclick="mostrarCadastro()" class="submit-btn">Não</button>
       </div>
-      <button type="submit" class="submit-btn" style="margin-top:18px;">Enviar Cadastro</button>
+    </div>
+    <form id="formLogin" style="display:none; flex-direction:column;">
+      <h2>Login do Síndico</h2>
+      <label>CNPJ ou CPF</label>
+      <input type="text" id="loginDocumento" required>
+      <label>Senha</label>
+      <input type="password" id="loginSenha" required>
+      <button type="submit" class="submit-btn">Entrar</button>
+      <button type="button" onclick="voltarInicio()" class="submit-btn" style="background:#eee; color:#333; margin-top:8px;">Voltar</button>
+      <button type="button" id="btnEsqueciSenhaSindico" class="esqueci-senha-link">Esqueci minha senha</button>
     </form>
+    <form id="formCadastro" style="display:none; flex-direction:column;">
+      <h2>Cadastro de Síndico</h2>
+      <label>Nome do síndico</label>
+      <input type="text" id="cadNome" required>
+      <label>CNPJ ou CPF</label>
+      <input type="text" id="cadDocumento" required>
+      <label>Email</label>
+        <input type="email" id="cadEmail" required>
+      <label>Telefone</label>
+      <input type="text" id="cadTelefone" required>
+      <label>Nome do empreendimento</label>
+      <div id="empreendimentosArea" style="display:flex; flex-direction:column; gap:8px;">
+        <div class="empreendimento-item" style="display:flex; align-items:center; gap:6px;">
+          <input type="text" class="cadEmpreendimento" required>
+        </div>
+      </div>
+      <button type="button" id="btnAddEmpreendimento" class="submit-btn" style="width:40px; padding:0; font-size:1.5em; margin: 0 0 12px 0;">+</button>
+      <label>Senha</label>
+      <input type="password" id="cadSenha" required>
+      <label>Confirmar senha</label>
+      <input type="password" id="cadSenha2" required>
+      <button type="submit" class="submit-btn">Cadastrar</button>
+      <button type="button" onclick="voltarInicio()" class="submit-btn" style="background:#eee; color:#333; margin-top:8px;">Voltar</button>
+    </form>
+    <div id="areaAutenticada" style="display:none; text-align:center;">
+      <form id="formEmpreendimento" style="margin: 32px auto; max-width: 420px; padding: 24px 28px; border-radius: 10px; color: #222; text-align:left; box-shadow: 0 2px 12px #0001;">
+        <label>Nome da empresa responsável</label>
+        <input type="text" id="empresaResponsavel" required>
+        <label>CNPJ da empresa</label>
+        <input type="text" id="cnpjEmpresa" required placeholder="00.000.000/0000-00">
+        <label>E-mail do responsável pela empresa</label>
+        <input type="email" id="emailResponsavelEmpresa" required>
+        <label>Telefone do responsável pela empresa</label>
+        <input type="text" id="telResponsavelEmpresa" required placeholder="(00) 00000-0000">
+        <label>Nome do empreendimento</label>
+        <input type="text" id="nomeEmpreendimento" required>
+        <label>Endereço do empreendimento</label>
+        <input type="text" id="enderecoEmpreendimento" required>
+        <label>Quantidade de torres</label>
+        <input type="number" id="qtdTorres" required min="1">
+        <label>Quantidade de apartamentos por andar</label>
+        <input type="number" id="qtdAptosAndar" required min="1">
+        <label>Quantidade de apartamentos total</label>
+        <input type="number" id="qtdAptosTotal" required min="1">
+        <label>Responsável pelo local (síndico)</label>
+        <input type="text" id="nomeSindico" required>
+        <label>E-mail do responsável</label>
+        <input type="email" id="emailSindico" required>
+        <label>Telefone do responsável</label>
+        <input type="text" id="telSindico" required placeholder="(00) 00000-0000">
+        <label>Data que o empreendimento foi entregue</label>
+        <input type="date" id="dataEntrega" required>
+        <label>Existe rede de alguma operadora no local?</label>
+        <select id="existeRedeOperadora" required>
+          <option value="">Selecione</option>
+          <option value="Sim">Sim</option>
+          <option value="Não">Não</option>
+        </select>
+        <div id="campoQualOperadora" style="display:none;">
+          <label>Qual operadora?</label>
+          <input type="text" id="qualOperadora">
+        </div>
+        <button type="submit" class="submit-btn" style="margin-top:18px;">Cadastrar empreendimento</button>
+      </form>
+      <div id="notificacaoEmpreendimento" style="display:none; margin-top:16px;"></div>
+    </div>
     <div class="notification" id="notification" style="display:none;"></div>
   </div>
-  <script>
-    // Login simples
-    document.getElementById('loginSindico').addEventListener('submit', function(e) {
-      e.preventDefault();
-      var usuario = document.getElementById('usuarioLogin').value.trim();
-      var senha = document.getElementById('senhaLogin').value;
-      if (usuario === 'sindico' && senha === '123456') {
-        document.getElementById('loginSindico').style.display = 'none';
-        document.getElementById('formSindico').style.display = 'flex';
-        document.getElementById('erroLogin').style.display = 'none';
-      } else {
-        document.getElementById('erroLogin').style.display = 'block';
-      }
-    });
-    function mostrarCampoOperadora() {
-      var select = document.getElementById('existeRedeOperadora');
-      var campo = document.getElementById('campoQualOperadora');
-      if (select.value === 'sim') {
-        campo.style.display = 'block';
-        document.getElementById('qualOperadora').setAttribute('required', 'required');
-      } else {
-        campo.style.display = 'none';
-        document.getElementById('qualOperadora').removeAttribute('required');
-      }
+  <div id="modalRecuperarSenhaSindico" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.4);z-index:10001;align-items:center;justify-content:center;">
+    <div style="background:#fff;padding:32px 28px 24px 28px;border-radius:12px;box-shadow:0 2px 16px #0002;min-width:320px;max-width:95vw;display:flex;flex-direction:column;align-items:center;position:relative;">
+      <span style="position:absolute;top:10px;right:18px;font-size:2em;color:#a32c43;cursor:pointer;" onclick="fecharModalRecuperarSenhaSindico()">&times;</span>
+      <h3 style="color:#d31a20;margin-bottom:18px;">Recuperar senha</h3>
+      <div id="recuperarSenhaEtapaDocumentoSindico">
+        <label for="recDocumentoSindico">Digite seu CNPJ ou CPF:</label>
+        <input type="text" id="recDocumentoSindico" maxlength="18" style="width:180px;text-align:center;">
+        <button type="button" id="btnBuscarEmailRecSindico" class="submit-btn" style="margin-top:10px;">Buscar e-mail</button>
+      </div>
+      <div id="recuperarSenhaEtapaEmailSindico" style="display:none;">
+        <div style="margin-bottom:10px;">E-mail cadastrado: <span id="recEmailMascSindico"></span></div>
+        <button type="button" id="btnEnviarCodigoRecSindico" class="submit-btn">Enviar verificação</button>
+      </div>
+      <div id="recuperarSenhaEtapaCodigoSindico" style="display:none;">
+        <label for="recCodigoSindico">Digite o código recebido:</label>
+        <input type="text" id="recCodigoSindico" maxlength="6" style="width:120px;text-align:center;">
+        <button type="button" id="btnValidarCodigoRecSindico" class="submit-btn" style="margin-top:10px;">Validar código</button>
+        <span id="recStatusCodigoSindico" style="margin-left:10px;font-size:0.97em;"></span>
+      </div>
+      <div id="recuperarSenhaEtapaNovaSenhaSindico" style="display:none;">
+        <label>Nova senha:</label>
+        <input type="password" id="recNovaSenhaSindico" autocomplete="new-password">
+        <label>Repetir nova senha:</label>
+        <input type="password" id="recNovaSenha2Sindico" autocomplete="new-password">
+        <button type="button" id="btnTrocarSenhaRecSindico" class="submit-btn" style="margin-top:10px;">Trocar senha</button>
+      </div>
+    </div>
+  </div>
+  <style>
+    .esqueci-senha-link {
+      background: none;
+      color: #008cff;
+      border: none;
+      text-align: center;
+      width: 100%;
+      margin-top: 10px;
+      font-size: 1em;
+      cursor: pointer;
+      text-decoration: underline transparent;
+      transition: color 0.2s, text-decoration 0.2s;
+      font-weight: 500;
+      box-shadow: none;
+      padding: 8px 0 0 0;
+      display: block;
     }
-    // Máscara para CNPJ e telefone
-    document.getElementById('cnpjEmpresa').addEventListener('input', function(e) {
-      let v = this.value.replace(/\D/g, '');
-      v = v.replace(/(\d{2})(\d)/, '$1.$2');
-      v = v.replace(/(\d{3})(\d)/, '$1.$2');
-      v = v.replace(/(\d{3})(\d)/, '$1/$2');
-      v = v.replace(/(\d{4})(\d{1,2})$/, '$1-$2');
-      this.value = v;
+    .esqueci-senha-link:hover {
+      color: #0d47a1;
+      text-decoration: underline;
+      background: none;
+    }
+  </style>
+  <script>
+    function mostrarLogin() {
+      document.getElementById('telaInicial').style.display = 'none';
+      document.getElementById('formLogin').style.display = 'flex';
+      document.getElementById('formCadastro').style.display = 'none';
+      document.getElementById('areaAutenticada').style.display = 'none';
+    }
+    function mostrarCadastro() {
+      document.getElementById('telaInicial').style.display = 'none';
+      document.getElementById('formLogin').style.display = 'none';
+      document.getElementById('formCadastro').style.display = 'flex';
+      document.getElementById('areaAutenticada').style.display = 'none';
+    }
+    function voltarInicio() {
+      document.getElementById('telaInicial').style.display = 'block';
+      document.getElementById('formLogin').style.display = 'none';
+      document.getElementById('formCadastro').style.display = 'none';
+      document.getElementById('areaAutenticada').style.display = 'none';
+    }
+    // Adicionar mais empreendimentos (com botão de remover)
+    document.getElementById('btnAddEmpreendimento').addEventListener('click', function() {
+      const area = document.getElementById('empreendimentosArea');
+      const div = document.createElement('div');
+      div.className = 'empreendimento-item';
+      div.style.display = 'flex';
+      div.style.alignItems = 'center';
+      div.style.gap = '6px';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'cadEmpreendimento';
+      input.required = true;
+      const btnRemover = document.createElement('button');
+      btnRemover.type = 'button';
+      btnRemover.innerText = '-';
+      btnRemover.style.background = '#eee';
+      btnRemover.style.color = '#a00';
+      btnRemover.style.border = 'none';
+      btnRemover.style.fontSize = '1.3em';
+      btnRemover.style.width = '32px';
+      btnRemover.style.height = '32px';
+      btnRemover.style.borderRadius = '50%';
+      btnRemover.style.cursor = 'pointer';
+      btnRemover.style.display = 'flex';
+      btnRemover.style.alignItems = 'center';
+      btnRemover.style.justifyContent = 'center';
+      btnRemover.onclick = function() {
+        area.removeChild(div);
+        atualizarBotoesRemoverEmpreendimento();
+      };
+      div.appendChild(input);
+      div.appendChild(btnRemover);
+      area.appendChild(div);
+      atualizarBotoesRemoverEmpreendimento();
     });
-    document.getElementById('telefoneResponsavelEmpresa').addEventListener('input', function(e) {
+    // Função para mostrar/esconder botão '-' (remover) conforme quantidade de campos
+    function atualizarBotoesRemoverEmpreendimento() {
+      const area = document.getElementById('empreendimentosArea');
+      const items = area.querySelectorAll('.empreendimento-item');
+      items.forEach(function(item, idx) {
+        const btn = item.querySelector('button');
+        if (btn) btn.style.display = (items.length > 1) ? 'flex' : 'none';
+      });
+    }
+    // Inicializa botão '-' no primeiro campo (não mostra)
+    atualizarBotoesRemoverEmpreendimento();
+    // Máscara para telefone
+    document.getElementById('cadTelefone').addEventListener('input', function(e) {
       let v = this.value.replace(/\D/g, '');
       v = v.replace(/(\d{2})(\d)/, '($1) $2');
       v = v.replace(/(\d{5})(\d)/, '$1-$2');
       this.value = v;
     });
-    document.getElementById('telefoneSindico').addEventListener('input', function(e) {
-      let v = this.value.replace(/\D/g, '');
-      v = v.replace(/(\d{2})(\d)/, '($1) $2');
-      v = v.replace(/(\d{5})(\d)/, '$1-$2');
-      this.value = v;
-    });
-    // Exemplo de envio (apenas feedback visual)
-    document.getElementById('formSindico').addEventListener('submit', async function(e) {
+    // Cadastro de síndico
+    document.getElementById('formCadastro').addEventListener('submit', async function(e) {
       e.preventDefault();
       const notification = document.getElementById('notification');
       notification.style.display = 'block';
       notification.innerText = 'Enviando...';
-      // Monta o objeto com os dados do formulário
+      const empreendimentos = Array.from(document.getElementsByClassName('cadEmpreendimento')).map(i => i.value.trim()).filter(Boolean);
+      if (document.getElementById('cadSenha').value !== document.getElementById('cadSenha2').value) {
+        notification.innerText = 'As senhas não coincidem!';
+        return;
+      }
       const dados = {
-        empresa_responsavel: document.getElementById('empresaResponsavel').value,
-        cnpj_empresa: document.getElementById('cnpjEmpresa').value,
-        email_responsavel_empresa: document.getElementById('emailResponsavelEmpresa').value,
-        telefone_responsavel_empresa: document.getElementById('telefoneResponsavelEmpresa').value,
-        nome_empreendimento: document.getElementById('nomeEmpreendimento').value,
-        qtd_torres: document.getElementById('qtdTorres').value,
-        qtd_aptos_por_andar: document.getElementById('qtdAptosPorAndar').value,
-        qtd_aptos_total: document.getElementById('qtdAptosTotal').value,
-        nome_sindico: document.getElementById('nomeSindico').value,
-        email_sindico: document.getElementById('emailSindico').value,
-        telefone_sindico: document.getElementById('telefoneSindico').value,
-        data_entrega: document.getElementById('dataEntrega').value,
-        existe_rede_operadora: document.getElementById('existeRedeOperadora').value === 'sim',
-        qual_operadora: document.getElementById('existeRedeOperadora').value === 'sim' ? document.getElementById('qualOperadora').value : null
+        nome: document.getElementById('cadNome').value,
+        documento: document.getElementById('cadDocumento').value,
+        email: document.getElementById('cadEmail').value,
+        telefone: document.getElementById('cadTelefone').value,
+        empreendimentos,
+        senha: document.getElementById('cadSenha').value
+      };
+      try {
+        const resp = await fetch('https://chegarprimeiro-sem-cor.onrender.com/api/sindico', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dados)
+        });
+        const result = await resp.json();
+        if (result.success) {
+          notification.innerText = 'Cadastro realizado com sucesso!';
+          setTimeout(function() {
+            notification.style.display = 'none';
+            document.getElementById('formCadastro').reset();
+            voltarInicio();
+          }, 3000);
+        } else {
+          notification.innerText = 'Erro ao cadastrar: ' + (result.error || 'Erro desconhecido');
+        }
+      } catch (err) {
+        notification.innerText = 'Erro ao conectar com o servidor.';
+      }
+    });
+    // Login de síndico
+    document.getElementById('formLogin').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const notification = document.getElementById('notification');
+      notification.style.display = 'block';
+      notification.innerText = 'Entrando...';
+      const dados = {
+        documento: document.getElementById('loginDocumento').value,
+        senha: document.getElementById('loginSenha').value
+      };
+      try {
+        const resp = await fetch('https://chegarprimeiro-sem-cor.onrender.com/api/sindico-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dados)
+        });
+        const result = await resp.json();
+        if (result.success) {
+          notification.style.display = 'none';
+          document.getElementById('formLogin').reset();
+          document.getElementById('formLogin').style.display = 'none';
+          document.getElementById('areaAutenticada').style.display = 'block';
+          // Garante que o formulário de empreendimento está visível
+          var formEmp = document.getElementById('formEmpreendimento');
+          if(formEmp) formEmp.style.display = 'block';
+        } else {
+          notification.innerText = 'Documento ou senha inválidos!';
+        }
+      } catch (err) {
+        notification.innerText = 'Erro ao conectar com o servidor.';
+      }
+    });
+    // Recuperação de senha do síndico
+    document.getElementById('btnEsqueciSenhaSindico').addEventListener('click', function() {
+      document.getElementById('modalRecuperarSenhaSindico').style.display = 'flex';
+      document.getElementById('recuperarSenhaEtapaDocumentoSindico').style.display = 'block';
+      document.getElementById('recuperarSenhaEtapaEmailSindico').style.display = 'none';
+      document.getElementById('recuperarSenhaEtapaCodigoSindico').style.display = 'none';
+      document.getElementById('recuperarSenhaEtapaNovaSenhaSindico').style.display = 'none';
+      document.getElementById('recDocumentoSindico').value = '';
+      document.getElementById('recEmailMascSindico').innerText = '';
+      document.getElementById('recCodigoSindico').value = '';
+      document.getElementById('recStatusCodigoSindico').innerText = '';
+      document.getElementById('recNovaSenhaSindico').value = '';
+      document.getElementById('recNovaSenha2Sindico').value = '';
+      window._recuperarSenhaSindico = { documento: '', email: '', codigo: '' };
+    });
+    function fecharModalRecuperarSenhaSindico() {
+      document.getElementById('modalRecuperarSenhaSindico').style.display = 'none';
+    }
+    // Buscar e-mail
+    document.getElementById('btnBuscarEmailRecSindico').addEventListener('click', async function() {
+      const doc = document.getElementById('recDocumentoSindico').value.trim();
+      if (!doc) return alert('Digite o CNPJ ou CPF!');
+      try {
+        const resp = await fetch('https://chegarprimeiro-sem-cor.onrender.com/api/recuperar-email-sindico', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ documento: doc })
+        });
+        const result = await resp.json();
+        if (result.success && result.email) {
+          window._recuperarSenhaSindico.documento = doc;
+          window._recuperarSenhaSindico.email = result.email;
+          document.getElementById('recuperarSenhaEtapaDocumentoSindico').style.display = 'none';
+          document.getElementById('recuperarSenhaEtapaEmailSindico').style.display = 'block';
+          document.getElementById('recEmailMascSindico').innerText = mascararEmail(result.email);
+        } else {
+          alert('Documento não encontrado!');
+        }
+      } catch (err) {
+        alert('Erro ao conectar com o servidor.');
+      }
+    });
+    // Enviar código
+    document.getElementById('btnEnviarCodigoRecSindico').addEventListener('click', async function() {
+      const doc = window._recuperarSenhaSindico.documento;
+      try {
+        const resp = await fetch('https://chegarprimeiro-sem-cor.onrender.com/api/enviar-codigo-recuperacao-sindico', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ documento: doc })
+        });
+        const result = await resp.json();
+        if (result.success) {
+          document.getElementById('recuperarSenhaEtapaEmailSindico').style.display = 'none';
+          document.getElementById('recuperarSenhaEtapaCodigoSindico').style.display = 'block';
+        } else {
+          alert('Erro ao enviar código.');
+        }
+      } catch (err) {
+        alert('Erro ao conectar com o servidor.');
+      }
+    });
+    // Validar código
+    document.getElementById('btnValidarCodigoRecSindico').addEventListener('click', function() {
+      const codigo = document.getElementById('recCodigoSindico').value.trim();
+      if (!codigo) return;
+      window._recuperarSenhaSindico.codigo = codigo;
+      document.getElementById('recStatusCodigoSindico').innerText = 'Código validado!';
+      setTimeout(function() {
+        document.getElementById('recuperarSenhaEtapaCodigoSindico').style.display = 'none';
+        document.getElementById('recuperarSenhaEtapaNovaSenhaSindico').style.display = 'block';
+      }, 800);
+    });
+    // Trocar senha
+    document.getElementById('btnTrocarSenhaRecSindico').addEventListener('click', async function() {
+      const senha1 = document.getElementById('recNovaSenhaSindico').value;
+      const senha2 = document.getElementById('recNovaSenha2Sindico').value;
+      if (!senha1 || senha1.length < 6) return alert('A senha deve ter pelo menos 6 caracteres.');
+      if (senha1 !== senha2) return alert('As senhas não coincidem!');
+      try {
+        const resp = await fetch('https://chegarprimeiro-sem-cor.onrender.com/api/trocar-senha-sindico', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ documento: window._recuperarSenhaSindico.documento, codigo: window._recuperarSenhaSindico.codigo, novaSenha: senha1 })
+        });
+        const result = await resp.json();
+        if (result.success) {
+          alert('Senha alterada com sucesso!');
+          fecharModalRecuperarSenhaSindico();
+        } else {
+          alert('Erro ao trocar senha: ' + (result.error || 'Erro desconhecido'));
+        }
+      } catch (err) {
+        alert('Erro ao conectar com o servidor.');
+      }
+    });
+    // Cadastro de empreendimento do síndico
+    document.getElementById('formEmpreendimento').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const notificacao = document.getElementById('notificacaoEmpreendimento');
+      notificacao.style.display = 'block';
+      notificacao.innerText = 'Enviando...';
+      const dados = {
+        empresaResponsavel: document.getElementById('empresaResponsavel').value,
+        cnpjEmpresa: document.getElementById('cnpjEmpresa').value,
+        emailResponsavelEmpresa: document.getElementById('emailResponsavelEmpresa').value,
+        telResponsavelEmpresa: document.getElementById('telResponsavelEmpresa').value,
+        nomeEmpreendimento: document.getElementById('nomeEmpreendimento').value,
+        enderecoEmpreendimento: document.getElementById('enderecoEmpreendimento').value,
+        qtdTorres: document.getElementById('qtdTorres').value,
+        qtdAptosAndar: document.getElementById('qtdAptosAndar').value,
+        qtdAptosTotal: document.getElementById('qtdAptosTotal').value,
+        nomeSindico: document.getElementById('nomeSindico').value,
+        emailSindico: document.getElementById('emailSindico').value,
+        telSindico: document.getElementById('telSindico').value,
+        dataEntrega: document.getElementById('dataEntrega').value,
+        existeRedeOperadora: document.getElementById('existeRedeOperadora').value,
+        qualOperadora: document.getElementById('qualOperadora').value
       };
       try {
         const resp = await fetch('https://chegarprimeiro-sem-cor.onrender.com/api/empreendimento', {
@@ -133,19 +417,34 @@
         });
         const result = await resp.json();
         if (result.success) {
-          notification.innerText = 'Cadastro enviado e salvo no banco de dados com sucesso!';
-          setTimeout(function() {
-            notification.style.display = 'none';
-            document.getElementById('formSindico').reset();
-            mostrarCampoOperadora();
-          }, 4000);
+          notificacao.innerText = 'Empreendimento cadastrado com sucesso!';
+          document.getElementById('formEmpreendimento').reset();
         } else {
-          notification.innerText = 'Erro ao salvar no banco de dados: ' + (result.error || 'Erro desconhecido');
+          notificacao.innerText = 'Erro ao cadastrar: ' + (result.error || 'Erro desconhecido');
         }
       } catch (err) {
-        notification.innerText = 'Erro ao conectar com o servidor.';
+        notificacao.innerText = 'Erro ao conectar com o servidor.';
+      }
+      setTimeout(() => { notificacao.style.display = 'none'; }, 4000);
+    });
+    // Mostrar/ocultar campo 'Qual operadora?'
+    document.getElementById('existeRedeOperadora').addEventListener('change', function() {
+      var campo = document.getElementById('campoQualOperadora');
+      if(this.value === 'Sim') {
+        campo.style.display = 'block';
+      } else {
+        campo.style.display = 'none';
+        document.getElementById('qualOperadora').value = '';
       }
     });
+    function mascararEmail(email) {
+      const [user, domain] = email.split('@');
+      if (user.length <= 2) return '*@' + domain;
+      return user[0] + '*'.repeat(user.length - 2) + user.slice(-1) + '@' + domain;
+    }
+    window.mostrarLogin = mostrarLogin;
+    window.mostrarCadastro = mostrarCadastro;
+    window.voltarInicio = voltarInicio;
   </script>
 </body>
 </html> 
