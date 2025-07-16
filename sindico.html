@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chegar Primeiro - Síndico</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h2 style="text-align:center; margin-bottom: 18px;">Cadastro de imovel</h2>
+    <form id="loginSindico" style="display:flex; flex-direction:column;">
+      <label>Usuário</label>
+      <input type="text" id="usuarioLogin" required autocomplete="username">
+      <label>Senha</label>
+      <input type="password" id="senhaLogin" required autocomplete="current-password">
+      <button type="submit" class="submit-btn" style="margin-top:18px;">Entrar</button>
+      <div id="erroLogin" style="color:#ffd2d2; background:#a32c43; border-radius:6px; margin-top:10px; padding:6px 10px; display:none;">Usuário ou senha incorretos!</div>
+    </form>
+    <form id="formSindico" style="display:none; flex-direction:column;">
+      <label>Nome da empresa responsável</label>
+      <input type="text" id="empresaResponsavel" required>
+      <label>CNPJ da empresa</label>
+      <input type="text" id="cnpjEmpresa" required maxlength="18" placeholder="00.000.000/0000-00">
+      <label>Email do responsável pela empresa</label>
+      <input type="email" id="emailResponsavelEmpresa" required>
+      <label>Telefone do responsável pela empresa</label>
+      <input type="text" id="telefoneResponsavelEmpresa" required maxlength="15" placeholder="(00) 00000-0000">
+      <label>Nome do Empreendimento</label>
+      <input type="text" id="nomeEmpreendimento" required>
+      <label>Quantidade de torres</label>
+      <input type="number" id="qtdTorres" min="1" required>
+      <label>Quantidade de apartamentos por andar</label>
+      <input type="number" id="qtdAptosPorAndar" min="1" required>
+      <label>Quantidade de apartamentos total</label>
+      <input type="number" id="qtdAptosTotal" min="1" required>
+      <label>Responsável pelo local (síndico)</label>
+      <input type="text" id="nomeSindico" required>
+      <label>Email do responsável</label>
+      <input type="email" id="emailSindico" required>
+      <label>Telefone do responsável</label>
+      <input type="text" id="telefoneSindico" required maxlength="15" placeholder="(00) 00000-0000">
+      <label>Data que o empreendimento foi entregue</label>
+      <input type="date" id="dataEntrega" required>
+      <label>Existe rede de alguma operadora no local?</label>
+      <select id="existeRedeOperadora" required onchange="mostrarCampoOperadora()">
+        <option value="">Selecione</option>
+        <option value="sim">Sim</option>
+        <option value="nao">Não</option>
+      </select>
+      <div id="campoQualOperadora" style="display:none;">
+        <label>Qual operadora?</label>
+        <input type="text" id="qualOperadora">
+      </div>
+      <button type="submit" class="submit-btn" style="margin-top:18px;">Enviar Cadastro</button>
+    </form>
+    <div class="notification" id="notification" style="display:none;"></div>
+  </div>
+  <script>
+    // Login simples
+    document.getElementById('loginSindico').addEventListener('submit', function(e) {
+      e.preventDefault();
+      var usuario = document.getElementById('usuarioLogin').value.trim();
+      var senha = document.getElementById('senhaLogin').value;
+      if (usuario === 'sindico' && senha === '123456') {
+        document.getElementById('loginSindico').style.display = 'none';
+        document.getElementById('formSindico').style.display = 'flex';
+        document.getElementById('erroLogin').style.display = 'none';
+      } else {
+        document.getElementById('erroLogin').style.display = 'block';
+      }
+    });
+    function mostrarCampoOperadora() {
+      var select = document.getElementById('existeRedeOperadora');
+      var campo = document.getElementById('campoQualOperadora');
+      if (select.value === 'sim') {
+        campo.style.display = 'block';
+        document.getElementById('qualOperadora').setAttribute('required', 'required');
+      } else {
+        campo.style.display = 'none';
+        document.getElementById('qualOperadora').removeAttribute('required');
+      }
+    }
+    // Máscara para CNPJ e telefone
+    document.getElementById('cnpjEmpresa').addEventListener('input', function(e) {
+      let v = this.value.replace(/\D/g, '');
+      v = v.replace(/(\d{2})(\d)/, '$1.$2');
+      v = v.replace(/(\d{3})(\d)/, '$1.$2');
+      v = v.replace(/(\d{3})(\d)/, '$1/$2');
+      v = v.replace(/(\d{4})(\d{1,2})$/, '$1-$2');
+      this.value = v;
+    });
+    document.getElementById('telefoneResponsavelEmpresa').addEventListener('input', function(e) {
+      let v = this.value.replace(/\D/g, '');
+      v = v.replace(/(\d{2})(\d)/, '($1) $2');
+      v = v.replace(/(\d{5})(\d)/, '$1-$2');
+      this.value = v;
+    });
+    document.getElementById('telefoneSindico').addEventListener('input', function(e) {
+      let v = this.value.replace(/\D/g, '');
+      v = v.replace(/(\d{2})(\d)/, '($1) $2');
+      v = v.replace(/(\d{5})(\d)/, '$1-$2');
+      this.value = v;
+    });
+    // Exemplo de envio (apenas feedback visual)
+    document.getElementById('formSindico').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const notification = document.getElementById('notification');
+      notification.style.display = 'block';
+      notification.innerText = 'Enviando...';
+      // Monta o objeto com os dados do formulário
+      const dados = {
+        empresa_responsavel: document.getElementById('empresaResponsavel').value,
+        cnpj_empresa: document.getElementById('cnpjEmpresa').value,
+        email_responsavel_empresa: document.getElementById('emailResponsavelEmpresa').value,
+        telefone_responsavel_empresa: document.getElementById('telefoneResponsavelEmpresa').value,
+        nome_empreendimento: document.getElementById('nomeEmpreendimento').value,
+        qtd_torres: document.getElementById('qtdTorres').value,
+        qtd_aptos_por_andar: document.getElementById('qtdAptosPorAndar').value,
+        qtd_aptos_total: document.getElementById('qtdAptosTotal').value,
+        nome_sindico: document.getElementById('nomeSindico').value,
+        email_sindico: document.getElementById('emailSindico').value,
+        telefone_sindico: document.getElementById('telefoneSindico').value,
+        data_entrega: document.getElementById('dataEntrega').value,
+        existe_rede_operadora: document.getElementById('existeRedeOperadora').value === 'sim',
+        qual_operadora: document.getElementById('existeRedeOperadora').value === 'sim' ? document.getElementById('qualOperadora').value : null
+      };
+      try {
+        const resp = await fetch('https://chegarprimeiro-sem-cor.onrender.com/api/empreendimento', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dados)
+        });
+        const result = await resp.json();
+        if (result.success) {
+          notification.innerText = 'Cadastro enviado e salvo no banco de dados com sucesso!';
+          setTimeout(function() {
+            notification.style.display = 'none';
+            document.getElementById('formSindico').reset();
+            mostrarCampoOperadora();
+          }, 4000);
+        } else {
+          notification.innerText = 'Erro ao salvar no banco de dados: ' + (result.error || 'Erro desconhecido');
+        }
+      } catch (err) {
+        notification.innerText = 'Erro ao conectar com o servidor.';
+      }
+    });
+  </script>
+</body>
+</html> 

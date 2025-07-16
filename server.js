@@ -4,6 +4,12 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
 const nodemailer = require('nodemailer');
+const multer = require('multer');
+const path = require('path');
+const upload = multer({
+  dest: 'uploads/', // pasta local para salvar arquivos
+  limits: { fileSize: 10 * 1024 * 1024 } // até 10MB por arquivo
+});
 
 const app = express();
 app.use(cors({
@@ -519,6 +525,145 @@ app.post('/api/trocar-senha', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Endpoint para cadastro de empreendimento (síndico)
+app.post('/api/empreendimento', async (req, res) => {
+  const {
+    empresa_responsavel,
+    cnpj_empresa,
+    email_responsavel_empresa,
+    telefone_responsavel_empresa,
+    nome_empreendimento,
+    qtd_torres,
+    qtd_aptos_por_andar,
+    qtd_aptos_total,
+    nome_sindico,
+    email_sindico,
+    telefone_sindico,
+    data_entrega,
+    existe_rede_operadora,
+    qual_operadora
+  } = req.body;
+
+  // Validação simples
+  if (!empresa_responsavel || !cnpj_empresa || !email_responsavel_empresa || !telefone_responsavel_empresa ||
+      !nome_empreendimento || !qtd_torres || !qtd_aptos_por_andar || !qtd_aptos_total ||
+      !nome_sindico || !email_sindico || !telefone_sindico || !data_entrega || typeof existe_rede_operadora === 'undefined') {
+    return res.status(400).json({ success: false, error: 'Campos obrigatórios faltando' });
+  }
+
+  try {
+    await executarQuery(
+      `INSERT INTO Empreendimento (
+        empresa_responsavel, cnpj_empresa, email_responsavel_empresa, telefone_responsavel_empresa,
+        nome_empreendimento, qtd_torres, qtd_aptos_por_andar, qtd_aptos_total,
+        nome_sindico, email_sindico, telefone_sindico, data_entrega, existe_rede_operadora, qual_operadora
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [
+        empresa_responsavel,
+        cnpj_empresa,
+        email_responsavel_empresa,
+        telefone_responsavel_empresa,
+        nome_empreendimento,
+        qtd_torres,
+        qtd_aptos_por_andar,
+        qtd_aptos_total,
+        nome_sindico,
+        email_sindico,
+        telefone_sindico,
+        data_entrega,
+        !!existe_rede_operadora,
+        qual_operadora || null
+      ]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[ERRO] Falha ao salvar empreendimento:', err);
+    res.status(500).json({ success: false, error: 'Erro ao salvar empreendimento' });
+  }
+});
+
+// Endpoint para cadastro de empreendimento da construtora
+app.post('/api/empreendimento-construtora', upload.fields([
+  { name: 'memorial_descritivo', maxCount: 1 },
+  { name: 'projeto_telefonia', maxCount: 1 }
+]), async (req, res) => {
+  try {
+    const {
+      construtora_responsavel,
+      nome_empreendimento,
+      cep,
+      endereco,
+      numero,
+      qtd_torres,
+      qtd_aptos_por_andar,
+      qtd_aptos_total,
+      data_inicio_obra,
+      data_fim_obra,
+      engenheiro_responsavel,
+      telefone_responsavel,
+      email_responsavel,
+      endereco_stand,
+      data_inicio_vendas,
+      data_fim_vendas,
+      nome_responsavel_stand,
+      telefone_responsavel_stand,
+      email_responsavel_stand
+    } = req.body;
+
+    // Caminhos dos arquivos salvos
+    const memorialDescritivoBuffer = req.files['memorial_descritivo'] ? require('fs').readFileSync(req.files['memorial_descritivo'][0].path) : null;
+    const projetoTelefoniaBuffer = req.files['projeto_telefonia'] ? require('fs').readFileSync(req.files['projeto_telefonia'][0].path) : null;
+
+    // Validação simples
+    if (!construtora_responsavel || !nome_empreendimento || !cep || !endereco || !numero ||
+        !qtd_torres || !qtd_aptos_por_andar || !qtd_aptos_total || !data_inicio_obra || !data_fim_obra ||
+        !engenheiro_responsavel || !telefone_responsavel || !email_responsavel ||
+        !memorialDescritivoPath || !projetoTelefoniaPath ||
+        !endereco_stand || !data_inicio_vendas || !data_fim_vendas ||
+        !nome_responsavel_stand || !telefone_responsavel_stand || !email_responsavel_stand) {
+      return res.status(400).json({ success: false, error: 'Campos obrigatórios faltando' });
+    }
+
+    await executarQuery(
+      `INSERT INTO Construtora (
+        construtora_responsavel, nome_empreendimento, cep, endereco, numero,
+        qtd_torres, qtd_aptos_por_andar, qtd_aptos_total, data_inicio_obra, data_fim_obra,
+        engenheiro_responsavel, telefone_responsavel, email_responsavel,
+        memorial_descritivo, projeto_telefonia,
+        endereco_stand, data_inicio_vendas, data_fim_vendas,
+        nome_responsavel_stand, telefone_responsavel_stand, email_responsavel_stand
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+      [
+        construtora_responsavel,
+        nome_empreendimento,
+        cep,
+        endereco,
+        numero,
+        qtd_torres,
+        qtd_aptos_por_andar,
+        qtd_aptos_total,
+        data_inicio_obra,
+        data_fim_obra,
+        engenheiro_responsavel,
+        telefone_responsavel,
+        email_responsavel,
+        memorialDescritivoBuffer,
+        projetoTelefoniaBuffer,
+        endereco_stand,
+        data_inicio_vendas,
+        data_fim_vendas,
+        nome_responsavel_stand,
+        telefone_responsavel_stand,
+        email_responsavel_stand
+      ]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[ERRO] Falha ao salvar empreendimento construtora:', err);
+    res.status(500).json({ success: false, error: 'Erro ao salvar empreendimento' });
   }
 });
 

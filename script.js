@@ -107,7 +107,7 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   function buscarCadastroCliente() {
     const cpf = document.getElementById('cpfContrato').value;
-    fetch(`https://chegar-primeiro.onrender.com/api/clientes/${cpf}`)
+    fetch(`https://chegarprimeiro-sem-cor.onrender.com/api/clientes/${cpf}`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
@@ -134,7 +134,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('btnTrocarServico').style.display = 'inline-block';
   }
   function enviarSolicitacaoTroca() {
-    fetch('https://chegar-primeiro.onrender.com/api/troca-servico', {
+    fetch('https://chegarprimeiro-sem-cor.onrender.com/api/troca-servico', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -362,7 +362,7 @@ document.addEventListener('DOMContentLoaded', function() {
       return;
     }
     mostrarCarregando();
-    fetch('https://chegar-primeiro.onrender.com/api/solicitacoes', {
+    fetch('https://chegarprimeiro-sem-cor.onrender.com/api/solicitacoes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -404,7 +404,7 @@ document.addEventListener('DOMContentLoaded', function() {
   formLogin.addEventListener('submit', function(e) {
     e.preventDefault();
     mostrarCarregando();
-    fetch('https://chegar-primeiro.onrender.com/api/login', {
+    fetch('https://chegarprimeiro-sem-cor.onrender.com/api/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -455,7 +455,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('areaAutenticada').style.display = 'block';
 
     // Buscar dados completos do cliente e preencher os campos
-    fetch(`https://chegar-primeiro.onrender.com/api/cliente-completo/${cliente.cpf}`)
+    fetch(`https://chegarprimeiro-sem-cor.onrender.com/api/cliente-completo/${cliente.cpf}`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
@@ -478,7 +478,7 @@ document.addEventListener('DOMContentLoaded', function() {
     formVistoria.addEventListener('submit', function(e) {
       e.preventDefault();
       mostrarCarregando();
-      fetch('https://chegar-primeiro.onrender.com/api/solicitacoes', {
+      fetch('https://chegarprimeiro-sem-cor.onrender.com/api/solicitacoes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -519,7 +519,7 @@ document.addEventListener('DOMContentLoaded', function() {
     formTroca.addEventListener('submit', function(e) {
       e.preventDefault();
       mostrarCarregando();
-      fetch('https://chegar-primeiro.onrender.com/api/solicitacoes', {
+      fetch('https://chegarprimeiro-sem-cor.onrender.com/api/solicitacoes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -571,7 +571,7 @@ document.addEventListener('DOMContentLoaded', function() {
       }
       mostrarCarregando();
       resultadoDiv.innerHTML = '';
-      fetch(`https://chegar-primeiro.onrender.com/api/solicitacao/${protocolo}`)
+      fetch(`https://chegarprimeiro-sem-cor.onrender.com/api/solicitacao/${protocolo}`)
         .then(res => res.json())
         .then(data => {
           esconderCarregando();
@@ -681,7 +681,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
       mostrarCarregando();
-      fetch('https://chegar-primeiro.onrender.com/api/enviar-codigo-email', {
+      fetch('https://chegarprimeiro-sem-cor.onrender.com/api/enviar-codigo-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
@@ -718,7 +718,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
       mostrarCarregando();
-      fetch('https://chegar-primeiro.onrender.com/api/validar-codigo-email', {
+      fetch('https://chegarprimeiro-sem-cor.onrender.com/api/validar-codigo-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, codigo })
@@ -816,7 +816,7 @@ document.addEventListener('DOMContentLoaded', function() {
       return;
     }
     mostrarCarregando();
-    fetch('https://chegar-primeiro.onrender.com/api/recuperar-email', {
+    fetch('https://chegarprimeiro-sem-cor.onrender.com/api/recuperar-email', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cpf })
@@ -845,7 +845,7 @@ document.addEventListener('DOMContentLoaded', function() {
   btnEnviarCodigoRec.addEventListener('click', function() {
     if (!recCpfGlobal) return;
     mostrarCarregando();
-    fetch('https://chegar-primeiro.onrender.com/api/enviar-codigo-recuperacao', {
+    fetch('https://chegarprimeiro-sem-cor.onrender.com/api/enviar-codigo-recuperacao', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cpf: recCpfGlobal })
@@ -903,7 +903,7 @@ document.addEventListener('DOMContentLoaded', function() {
       return;
     }
     mostrarCarregando();
-    fetch('https://chegar-primeiro.onrender.com/api/trocar-senha', {
+    fetch('https://chegarprimeiro-sem-cor.onrender.com/api/trocar-senha', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cpf: recCpfGlobal, codigo, novaSenha })

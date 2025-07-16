@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chegar Primeiro - Construtora</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+
+    <h2 style="text-align:center; margin-bottom: 18px;">Cadastro de Empreendimento (Construtora)</h2>
+    <form id="loginConstrutora" style="display:flex; flex-direction:column;">
+      <label>Usuário</label>
+      <input type="text" id="usuarioConstrutora" required autocomplete="username">
+      <label>Senha</label>
+      <input type="password" id="senhaConstrutora" required autocomplete="current-password">
+      <button type="submit" class="submit-btn" style="margin-top:18px;">Entrar</button>
+      <div id="erroLoginConstrutora" style="color:#ffd2d2; background:#a32c43; border-radius:6px; margin-top:10px; padding:6px 10px; display:none;">Usuário ou senha incorretos!</div>
+    </form>
+    <form id="formConstrutora" style="display:none; flex-direction:column;" enctype="multipart/form-data">
+      <label>Construtora Responsável</label>
+      <input type="text" id="construtoraResponsavel" required>
+      <label>Nome do empreendimento</label>
+      <input type="text" id="nomeEmpreendimento" required>
+      <label>CEP</label>
+      <input type="text" id="cepEmpreendimento" required maxlength="9" placeholder="00000-000">
+      <label>Endereço</label>
+      <input type="text" id="enderecoEmpreendimento" required>
+      <label>Número</label>
+      <input type="text" id="numeroEmpreendimento" required>
+      <label>Quantidade de torres</label>
+      <input type="number" id="qtdTorres" min="1" required>
+      <label>Quantidade de apartamentos por andar</label>
+      <input type="number" id="qtdAptosPorAndar" min="1" required>
+      <label>Quantidade de apartamentos total</label>
+      <input type="number" id="qtdAptosTotal" min="1" required>
+      <label>Data do início da obra</label>
+      <input type="date" id="dataInicioObra" required>
+      <label>Data fim da obra</label>
+      <input type="date" id="dataFimObra" required>
+      <label>Engenheiro responsável</label>
+      <input type="text" id="engenheiroResponsavel" required>
+      <label>Telefone do responsável</label>
+      <input type="text" id="telefoneResponsavel" required maxlength="15" placeholder="(00) 00000-0000">
+      <label>Email do responsável</label>
+      <input type="email" id="emailResponsavel" required>
+      <label>Memorial descritivo (PDF)</label>
+      <input type="file" id="memorialDescritivo" accept="application/pdf" required>
+      <label>Projeto da rede de telefonia (PDF)</label>
+      <input type="file" id="projetoTelefonia" accept="application/pdf" required>
+      <label>Endereço do Stand de vendas</label>
+      <input type="text" id="enderecoStand" required>
+      <label>Data início das vendas</label>
+      <input type="date" id="dataInicioVendas" required>
+      <label>Data fim das vendas</label>
+      <input type="date" id="dataFimVendas" required>
+      <label>Nome do Responsável pelo Stand de vendas</label>
+      <input type="text" id="nomeResponsavelStand" required>
+      <label>Telefone do responsável</label>
+      <input type="text" id="telefoneResponsavelStand" required maxlength="15" placeholder="(00) 00000-0000">
+      <label>Email do responsável</label>
+      <input type="email" id="emailResponsavelStand" required>
+      <button type="submit" class="submit-btn" style="margin-top:18px;">Enviar Cadastro</button>
+    </form>
+    <div class="notification" id="notificationConstrutora" style="display:none;"></div>
+  </div>
+  <script>
+    // Login simples
+    document.getElementById('loginConstrutora').addEventListener('submit', function(e) {
+      e.preventDefault();
+      var usuario = document.getElementById('usuarioConstrutora').value.trim();
+      var senha = document.getElementById('senhaConstrutora').value;
+      if (usuario === 'construtora' && senha === '123456') {
+        document.getElementById('loginConstrutora').style.display = 'none';
+        document.getElementById('formConstrutora').style.display = 'flex';
+        document.getElementById('erroLoginConstrutora').style.display = 'none';
+      } else {
+        document.getElementById('erroLoginConstrutora').style.display = 'block';
+      }
+    });
+    // Máscara para CEP e telefone
+    document.getElementById('cepEmpreendimento').addEventListener('input', function(e) {
+      let v = this.value.replace(/\D/g, '');
+      if (v.length > 5) v = v.slice(0,5) + '-' + v.slice(5,8);
+      this.value = v;
+    });
+    document.getElementById('telefoneResponsavel').addEventListener('input', function(e) {
+      let v = this.value.replace(/\D/g, '');
+      v = v.replace(/(\d{2})(\d)/, '($1) $2');
+      v = v.replace(/(\d{5})(\d)/, '$1-$2');
+      this.value = v;
+    });
+    document.getElementById('telefoneResponsavelStand').addEventListener('input', function(e) {
+      let v = this.value.replace(/\D/g, '');
+      v = v.replace(/(\d{2})(\d)/, '($1) $2');
+      v = v.replace(/(\d{5})(\d)/, '$1-$2');
+      this.value = v;
+    });
+    // Envio do formulário
+    document.getElementById('formConstrutora').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const notification = document.getElementById('notificationConstrutora');
+      notification.style.display = 'block';
+      notification.innerText = 'Enviando...';
+      const formData = new FormData();
+      formData.append('construtora_responsavel', document.getElementById('construtoraResponsavel').value);
+      formData.append('nome_empreendimento', document.getElementById('nomeEmpreendimento').value);
+      formData.append('cep', document.getElementById('cepEmpreendimento').value);
+      formData.append('endereco', document.getElementById('enderecoEmpreendimento').value);
+      formData.append('numero', document.getElementById('numeroEmpreendimento').value);
+      formData.append('qtd_torres', document.getElementById('qtdTorres').value);
+      formData.append('qtd_aptos_por_andar', document.getElementById('qtdAptosPorAndar').value);
+      formData.append('qtd_aptos_total', document.getElementById('qtdAptosTotal').value);
+      formData.append('data_inicio_obra', document.getElementById('dataInicioObra').value);
+      formData.append('data_fim_obra', document.getElementById('dataFimObra').value);
+      formData.append('engenheiro_responsavel', document.getElementById('engenheiroResponsavel').value);
+      formData.append('telefone_responsavel', document.getElementById('telefoneResponsavel').value);
+      formData.append('email_responsavel', document.getElementById('emailResponsavel').value);
+      formData.append('memorial_descritivo', document.getElementById('memorialDescritivo').files[0]);
+      formData.append('projeto_telefonia', document.getElementById('projetoTelefonia').files[0]);
+      formData.append('endereco_stand', document.getElementById('enderecoStand').value);
+      formData.append('data_inicio_vendas', document.getElementById('dataInicioVendas').value);
+      formData.append('data_fim_vendas', document.getElementById('dataFimVendas').value);
+      formData.append('nome_responsavel_stand', document.getElementById('nomeResponsavelStand').value);
+      formData.append('telefone_responsavel_stand', document.getElementById('telefoneResponsavelStand').value);
+      formData.append('email_responsavel_stand', document.getElementById('emailResponsavelStand').value);
+      try {
+        const resp = await fetch('https://chegarprimeiro-sem-cor.onrender.com/api/empreendimento-construtora', {
+          method: 'POST',
+          body: formData
+        });
+        const result = await resp.json();
+        if (result.success) {
+          notification.innerText = 'Cadastro enviado e salvo no banco de dados com sucesso!';
+          setTimeout(function() {
+            notification.style.display = 'none';
+            document.getElementById('formConstrutora').reset();
+          }, 4000);
+        } else {
+          notification.innerText = 'Erro ao salvar no banco de dados: ' + (result.error || 'Erro desconhecido');
+        }
+      } catch (err) {
+        notification.innerText = 'Erro ao conectar com o servidor.';
+      }
+    });
+  </script>
+</body>
+</html> 
