@@ -13,7 +13,7 @@ const upload = multer({
 
 const app = express();
 app.use(cors({
-  origin: ['https://chegar-primeiro.netlify.app', 'http://localhost:8888'],
+  origin: ['https://chegarprimeiro.netlify.app', 'http://localhost:8888'],
   credentials: true
 }));
 app.options('*', cors());
