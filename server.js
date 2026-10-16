@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const XLSX = require('xlsx');
 const { Octokit } = require('@octokit/rest');
 require('dotenv').config();
 
@@ -78,12 +79,67 @@ async function fetchSharePointListRows() {
   return Array.isArray(data.value) ? data.value.map((item) => item.fields || {}) : [];
 }
 
+function parseWorkbookRows(buffer, fileName) {
+  const workbook = XLSX.read(buffer, { type: 'array' });
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) return [];
+  const firstSheet = workbook.Sheets[firstSheetName];
+  const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: '', raw: false });
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function fetchGitHubFileRows(filePath) {
+  const { GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO } = process.env;
+  if (!filePath || !GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
+    return [];
+  }
+
+  const octokit = new Octokit({ auth: GITHUB_TOKEN });
+  const { data } = await octokit.repos.getContent({ owner: GITHUB_OWNER, repo: GITHUB_REPO, path: filePath });
+
+  if (Array.isArray(data) || !data.content) {
+    return [];
+  }
+
+  const buffer = Buffer.from(data.content, 'base64');
+  return parseWorkbookRows(buffer, filePath);
+}
+
 app.get('/api/sharepoint-list', async (req, res) => {
   try {
     const rows = await fetchSharePointListRows();
     res.json({ ok: true, count: rows.length, rows });
   } catch (error) {
     console.error('sharepoint-list-error', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/latest-dashboard-data', async (req, res) => {
+  try {
+    const irPath = process.env.GITHUB_PATH_IR || process.env.GITHUB_PATH;
+    const inventarioPath = process.env.GITHUB_PATH_INVENTARIO || process.env.GITHUB_PATH;
+
+    const [sharepointRows, irAreaRows, inventarioRows] = await Promise.all([
+      fetchSharePointListRows(),
+      fetchGitHubFileRows(irPath),
+      fetchGitHubFileRows(inventarioPath)
+    ]);
+
+    res.json({
+      ok: true,
+      rows: {
+        sharepoint: sharepointRows,
+        irArea: irAreaRows,
+        inventario: inventarioRows,
+      },
+      config: {
+        irPath,
+        inventarioPath
+      }
+    });
+  } catch (error) {
+    console.error('latest-dashboard-data-error', error.message);
     res.status(500).json({ error: error.message });
   }
 });
