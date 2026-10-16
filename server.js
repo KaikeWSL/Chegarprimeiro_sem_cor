@@ -95,8 +95,8 @@ app.post('/upload-excel', upload.single('file'), (req, res) => {
 
 app.post('/update-github', async (req, res) => {
   try {
-    const { fileName } = req.body;
-    const { GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO, GITHUB_PATH } = process.env;
+    const { fileName, originalname } = req.body;
+    const { GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO, GITHUB_PATH, GITHUB_PATH_IR, GITHUB_PATH_INVENTARIO } = process.env;
     if (!GITHUB_TOKEN) return res.status(500).json({ error: 'GITHUB_TOKEN not set' });
     const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
@@ -107,7 +107,15 @@ app.post('/update-github', async (req, res) => {
 
     const owner = GITHUB_OWNER || req.body.owner;
     const repo = GITHUB_REPO || req.body.repo;
-    const githubPath = GITHUB_PATH || req.body.path || req.body.originalname || fileName;
+
+    const fileLabel = String(originalname || fileName || '').toUpperCase();
+    const inferredGithubPath = /IR_AREA/i.test(fileLabel)
+      ? (GITHUB_PATH_IR || GITHUB_PATH || req.body.path || fileName)
+      : /INVENTARIO/i.test(fileLabel)
+        ? (GITHUB_PATH_INVENTARIO || GITHUB_PATH || req.body.path || fileName)
+        : (GITHUB_PATH || req.body.path || req.body.originalname || fileName);
+
+    const githubPath = req.body.githubPath || inferredGithubPath;
 
     let sha;
     try {
@@ -126,7 +134,7 @@ app.post('/update-github', async (req, res) => {
       sha,
     });
 
-    res.json({ ok: true });
+    res.json({ ok: true, githubPath });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
