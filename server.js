@@ -11,6 +11,29 @@ const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 const upload = multer({ dest: uploadDir });
 
+const allowedOrigins = [
+  'https://dashboardinventariogpon.netlify.app',
+  'http://localhost:3000',
+  'http://localhost:8080',
+  'http://127.0.0.1:3000'
+];
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'frontend', 'public')));
 
