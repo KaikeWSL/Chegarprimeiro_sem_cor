@@ -131,8 +131,49 @@ async function fetchGitHubFileRows(filePath) {
 function getGithubRepoContext(req) {
   const { GITHUB_OWNER, GITHUB_REPO } = process.env;
   return {
-    owner: GITHUB_OWNER || req.body.owner || req.query.owner,
-    repo: GITHUB_REPO || req.body.repo || req.query.repo
+    owner: GITHUB_OWNER || req?.body?.owner || req?.query?.owner,
+    repo: GITHUB_REPO || req?.body?.repo || req?.query?.repo
+  };
+}
+
+function normalizeGithubPath(value) {
+  return String(value || '').trim().replace(/^\/+/, '');
+}
+
+function extractDatePrefix(fileName) {
+  const match = String(fileName || '').match(/^(\d{8})/);
+  return match ? Number(match[1]) : 0;
+}
+
+async function resolveGithubExcelPaths(octokit, owner, repo) {
+  const configuredIrPath = normalizeGithubPath(process.env.GITHUB_PATH_IR || process.env.GITHUB_PATH || '');
+  const configuredInventarioPath = normalizeGithubPath(process.env.GITHUB_PATH_INVENTARIO || process.env.GITHUB_PATH || '');
+
+  if (configuredIrPath && configuredInventarioPath) {
+    return { irPath: configuredIrPath, inventarioPath: configuredInventarioPath };
+  }
+
+  const rootContent = await octokit.repos.getContent({ owner, repo, path: '' });
+  const files = Array.isArray(rootContent.data) ? rootContent.data : [];
+  const excelFiles = files
+    .filter((item) => item.type === 'file' && /\.(xlsx|xls|csv)$/i.test(item.name || ''))
+    .map((item) => item.name);
+
+  const irFiles = excelFiles.filter((name) => /IR_AREA/i.test(name));
+  const inventarioFiles = excelFiles.filter((name) => /INVENTARIO/i.test(name));
+
+  const pickLatest = (list) => {
+    if (!list.length) return '';
+    return [...list].sort((a, b) => {
+      const dateA = extractDatePrefix(a);
+      const dateB = extractDatePrefix(b);
+      return dateB - dateA || b.localeCompare(a);
+    })[0];
+  };
+
+  return {
+    irPath: configuredIrPath || pickLatest(irFiles) || '',
+    inventarioPath: configuredInventarioPath || pickLatest(inventarioFiles) || ''
   };
 }
 
@@ -159,8 +200,24 @@ app.get('/api/sharepoint-list', async (req, res) => {
 
 app.get('/api/latest-dashboard-data', async (req, res) => {
   try {
-    const irPath = process.env.GITHUB_PATH_IR || process.env.GITHUB_PATH;
-    const inventarioPath = process.env.GITHUB_PATH_INVENTARIO || process.env.GITHUB_PATH;
+    const { GITHUB_TOKEN } = process.env;
+    if (!GITHUB_TOKEN) {
+      return res.status(500).json({ error: 'GITHUB_TOKEN not set' });
+    }
+
+    const { owner, repo } = getGithubRepoContext(req);
+    if (!owner || !repo) {
+      return res.status(500).json({ error: 'GITHUB_OWNER e GITHUB_REPO não configurados no Render.' });
+    }
+
+    const octokit = new Octokit({ auth: GITHUB_TOKEN });
+    const resolvedPaths = await resolveGithubExcelPaths(octokit, owner, repo);
+    const irPath = normalizedGithubPath(resolvedPaths.irPath || process.env.GITHUB_PATH_IR || process.env.GITHUB_PATH || '');
+    const inventarioPath = normalizedGithubPath(resolvedPaths.inventarioPath || process.env.GITHUB_PATH_INVENTARIO || process.env.GITHUB_PATH || '');
+
+    if (!irPath || !inventarioPath) {
+      return res.status(500).json({ error: 'Nenhum arquivo Excel IR_AREA ou INVENTARIO_IR encontrado na raiz do repositório do GitHub.' });
+    }
 
     const [sharepointRows, irAreaRows, inventarioRows] = await Promise.all([
       fetchSharePointListRows(),
