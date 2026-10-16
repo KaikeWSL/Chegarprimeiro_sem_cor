@@ -212,8 +212,8 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
 
     const octokit = new Octokit({ auth: GITHUB_TOKEN });
     const resolvedPaths = await resolveGithubExcelPaths(octokit, owner, repo);
-    const irPath = normalizedGithubPath(resolvedPaths.irPath || process.env.GITHUB_PATH_IR || process.env.GITHUB_PATH || '');
-    const inventarioPath = normalizedGithubPath(resolvedPaths.inventarioPath || process.env.GITHUB_PATH_INVENTARIO || process.env.GITHUB_PATH || '');
+    const irPath = normalizeGithubPath(resolvedPaths.irPath || process.env.GITHUB_PATH_IR || process.env.GITHUB_PATH || '');
+    const inventarioPath = normalizeGithubPath(resolvedPaths.inventarioPath || process.env.GITHUB_PATH_INVENTARIO || process.env.GITHUB_PATH || '');
 
     if (!irPath || !inventarioPath) {
       return res.status(500).json({ error: 'Nenhum arquivo Excel IR_AREA ou INVENTARIO_IR encontrado na raiz do repositório do GitHub.' });
