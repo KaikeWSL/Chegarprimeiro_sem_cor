@@ -128,6 +128,25 @@ async function fetchGitHubFileRows(filePath) {
   return parseWorkbookRows(buffer, filePath);
 }
 
+function getGithubRepoContext(req) {
+  const { GITHUB_OWNER, GITHUB_REPO } = process.env;
+  return {
+    owner: GITHUB_OWNER || req.body.owner || req.query.owner,
+    repo: GITHUB_REPO || req.body.repo || req.query.repo
+  };
+}
+
+function buildGithubAccessErrorMessage(error, owner, repo) {
+  const message = error?.message || '';
+
+  if (/Resource not accessible by personal access token|SAML|Not Found|Bad credentials|Requires authentication/i.test(message)) {
+    const repoTarget = owner && repo ? `${owner}/${repo}` : 'o repositório configurado';
+    return `Token do GitHub sem permissão para ${repoTarget}. Verifique se o PAT tem permissão de Contents: Read and write e se o SSO foi habilitado para esse repositório/organização.`;
+  }
+
+  return error?.message || 'Erro ao atualizar o arquivo no GitHub.';
+}
+
 app.get('/api/sharepoint-list', async (req, res) => {
   try {
     const rows = await fetchSharePointListRows();
@@ -167,6 +186,41 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
   }
 });
 
+app.get('/api/test-github', async (req, res) => {
+  try {
+    const { GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO } = process.env;
+    if (!GITHUB_TOKEN) {
+      return res.status(500).json({ error: 'GITHUB_TOKEN not set' });
+    }
+
+    const owner = GITHUB_OWNER || req.query.owner;
+    const repo = GITHUB_REPO || req.query.repo;
+
+    if (!owner || !repo) {
+      return res.status(500).json({ error: 'GITHUB_OWNER e GITHUB_REPO não configurados no Render.' });
+    }
+
+    const octokit = new Octokit({ auth: GITHUB_TOKEN });
+    const response = await octokit.repos.get({ owner, repo });
+
+    res.json({
+      ok: true,
+      owner,
+      repo,
+      access: 'granted',
+      private: Boolean(response?.data?.private),
+      defaultBranch: response?.data?.default_branch || null
+    });
+  } catch (error) {
+    console.error('github-test-error', error);
+    const { GITHUB_OWNER, GITHUB_REPO } = process.env;
+    const owner = GITHUB_OWNER || req.query.owner;
+    const repo = GITHUB_REPO || req.query.repo;
+    const friendly = buildGithubAccessErrorMessage(error, owner, repo);
+    res.status(500).json({ error: friendly, rawError: error.message });
+  }
+});
+
 app.post('/upload-excel', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   res.json({ filename: req.file.filename, originalname: req.file.originalname, path: req.file.path });
@@ -175,17 +229,20 @@ app.post('/upload-excel', upload.single('file'), (req, res) => {
 app.post('/update-github', async (req, res) => {
   try {
     const { fileName, originalname } = req.body;
-    const { GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO, GITHUB_PATH, GITHUB_PATH_IR, GITHUB_PATH_INVENTARIO } = process.env;
+    const { GITHUB_TOKEN, GITHUB_PATH, GITHUB_PATH_IR, GITHUB_PATH_INVENTARIO } = process.env;
     if (!GITHUB_TOKEN) return res.status(500).json({ error: 'GITHUB_TOKEN not set' });
+
+    const { owner, repo } = getGithubRepoContext(req);
+    if (!owner || !repo) {
+      return res.status(500).json({ error: 'GITHUB_OWNER e GITHUB_REPO não configurados no Render.' });
+    }
+
     const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
     const filePath = path.join(uploadDir, fileName);
     if (!fs.existsSync(filePath)) return res.status(400).json({ error: 'File not found on server' });
     const content = fs.readFileSync(filePath);
     const b64content = content.toString('base64');
-
-    const owner = GITHUB_OWNER || req.body.owner;
-    const repo = GITHUB_REPO || req.body.repo;
 
     const fileLabel = String(originalname || fileName || '').toUpperCase();
     const inferredGithubPath = /IR_AREA/i.test(fileLabel)
@@ -215,8 +272,10 @@ app.post('/update-github', async (req, res) => {
 
     res.json({ ok: true, githubPath });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    console.error('update-github-error', err);
+    const { owner, repo } = getGithubRepoContext(req);
+    const friendlyError = buildGithubAccessErrorMessage(err, owner, repo);
+    res.status(500).json({ error: friendlyError, rawError: err.message });
   }
 });
 
