@@ -37,13 +37,18 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'frontend', 'public')));
 
+function normalizeSharePointListName(value) {
+  const normalized = String(value || '').trim();
+  return normalized || 'Inventario_Gpon';
+}
+
 function getSharePointConfig() {
   return {
     tenantId: process.env.TENANT_ID,
     clientId: process.env.CLIENT_ID,
     clientSecret: process.env.CLIENT_SECRET,
     siteUrl: process.env.SHAREPOINT_SITE_URL,
-    listName: process.env.SHAREPOINT_LIST_NAME || 'Inventario_Gpon',
+    listName: normalizeSharePointListName(process.env.SHAREPOINT_LIST_NAME || 'Inventario_Gpon'),
     listFields: process.env.SHAREPOINT_LIST_FIELDS || ''
   };
 }
@@ -87,6 +92,12 @@ async function fetchSharePointListRows() {
   const graphUrl = `https://graph.microsoft.com/v1.0/sites/${site.hostname}:${sitePath}:/lists/${encodeURIComponent(listName)}/items?$expand=fields&$top=1000`;
   const token = await getGraphToken();
 
+  console.log('[SharePoint] Consultando lista', {
+    siteUrl,
+    listName,
+    graphUrl
+  });
+
   const response = await fetch(graphUrl, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -99,7 +110,20 @@ async function fetchSharePointListRows() {
     throw new Error(data?.error?.message || 'Erro ao consultar lista do SharePoint.');
   }
 
-  return Array.isArray(data.value) ? data.value.map((item) => item.fields || {}) : [];
+  const rows = Array.isArray(data.value) ? data.value.map((item) => item.fields || {}) : [];
+  if (rows.length) {
+    const sampleKeys = Object.keys(rows[0]);
+    console.log('[SharePoint] Lista retornada com sucesso', {
+      listName,
+      count: rows.length,
+      sampleKeys,
+      firstRow: rows[0]
+    });
+  } else {
+    console.warn('[SharePoint] Lista retornou zero registros', { listName, siteUrl });
+  }
+
+  return rows;
 }
 
 function parseWorkbookRows(buffer, fileName) {
@@ -344,6 +368,7 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
       fetchGitHubFileRows(inventarioPath)
     ]);
 
+    const sharepointConfig = getSharePointConfig();
     const extractionDate = getLatestExcelDateFromPaths([irPath, inventarioPath]);
 
     res.json({
@@ -355,7 +380,11 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
       },
       config: {
         irPath,
-        inventarioPath
+        inventarioPath,
+        sharepoint: {
+          siteUrl: sharepointConfig.siteUrl,
+          listName: sharepointConfig.listName
+        }
       },
       extractionDate: extractionDate ? extractionDate.toISOString() : null
     });
