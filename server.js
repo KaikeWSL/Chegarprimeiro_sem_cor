@@ -202,6 +202,25 @@ function extractDatePrefix(fileName) {
   return match ? Number(match[1]) : 0;
 }
 
+function getLatestExcelDateFromPaths(paths = []) {
+  const dates = (paths || [])
+    .map((value) => {
+      const fileName = String(value || '').split('/').pop();
+      return extractDatePrefix(fileName);
+    })
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => b - a);
+
+  if (!dates.length) return null;
+
+  const isoDate = String(dates[0]);
+  const year = Number(isoDate.slice(0, 4));
+  const month = Number(isoDate.slice(4, 6)) - 1;
+  const day = Number(isoDate.slice(6, 8));
+
+  return new Date(year, month, day);
+}
+
 function logGithubExcelStatus(stage, details = {}) {
   const sanitized = Object.entries(details)
     .map(([key, value]) => `${key}=${String(value ?? 'undefined')}`)
@@ -325,6 +344,8 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
       fetchGitHubFileRows(inventarioPath)
     ]);
 
+    const extractionDate = getLatestExcelDateFromPaths([irPath, inventarioPath]);
+
     res.json({
       ok: true,
       rows: {
@@ -335,7 +356,8 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
       config: {
         irPath,
         inventarioPath
-      }
+      },
+      extractionDate: extractionDate ? extractionDate.toISOString() : null
     });
   } catch (error) {
     console.error('latest-dashboard-data-error', error.message);
