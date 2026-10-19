@@ -402,13 +402,11 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
 
     const sharepointConfig = getSharePointConfig();
     const extractionDate = getLatestExcelDateFromPaths([irPath, inventarioPath]);
-    const dashboardSharepointRows = secondaryListName ? secondarySharepointRows : sharepointRows;
-    const dashboardListName = secondaryListName || primaryListName;
 
     res.json({
       ok: true,
       rows: {
-        sharepoint: dashboardSharepointRows,
+        sharepoint: sharepointRows,
         sharepointSecondary: secondarySharepointRows,
         irArea: irAreaRows,
         inventario: inventarioRows,
@@ -419,9 +417,7 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
         sharepoint: {
           siteUrl: sharepointConfig.siteUrl,
           listName: primaryListName,
-          secondaryListName: secondaryListName || null,
-          dashboardListName,
-          sourceUsed: dashboardListName
+          secondaryListName: secondaryListName || null
         }
       },
       extractionDate: extractionDate ? extractionDate.toISOString() : null
