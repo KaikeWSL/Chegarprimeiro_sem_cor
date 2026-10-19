@@ -145,11 +145,30 @@ function extractDatePrefix(fileName) {
   return match ? Number(match[1]) : 0;
 }
 
+function logGithubExcelStatus(stage, details = {}) {
+  const sanitized = Object.entries(details)
+    .map(([key, value]) => `${key}=${String(value ?? 'undefined')}`)
+    .join(' | ');
+
+  console.log(`[GitHub Excel] ${stage}${sanitized ? ` | ${sanitized}` : ''}`);
+}
+
 async function resolveGithubExcelPaths(octokit, owner, repo) {
   const configuredIrPath = normalizeGithubPath(process.env.GITHUB_PATH_IR || process.env.GITHUB_PATH || '');
   const configuredInventarioPath = normalizeGithubPath(process.env.GITHUB_PATH_INVENTARIO || process.env.GITHUB_PATH || '');
 
+  logGithubExcelStatus('Iniciando busca dos arquivos Excel na raiz do repositório', {
+    owner,
+    repo,
+    configuredIrPath: configuredIrPath || 'não informado',
+    configuredInventarioPath: configuredInventarioPath || 'não informado'
+  });
+
   if (configuredIrPath && configuredInventarioPath) {
+    logGithubExcelStatus('Usando caminhos configurados no ambiente', {
+      irPath: configuredIrPath,
+      inventarioPath: configuredInventarioPath
+    });
     return { irPath: configuredIrPath, inventarioPath: configuredInventarioPath };
   }
 
@@ -158,6 +177,11 @@ async function resolveGithubExcelPaths(octokit, owner, repo) {
   const excelFiles = files
     .filter((item) => item.type === 'file' && /\.(xlsx|xls|csv)$/i.test(item.name || ''))
     .map((item) => item.name);
+
+  logGithubExcelStatus('Verificação da raiz do repositório concluída', {
+    arquivosExcelEncontrados: excelFiles.length,
+    lista: excelFiles.join(', ') || 'nenhum arquivo excel encontrado'
+  });
 
   const irFiles = excelFiles.filter((name) => /IR_AREA/i.test(name));
   const inventarioFiles = excelFiles.filter((name) => /INVENTARIO/i.test(name));
@@ -171,10 +195,24 @@ async function resolveGithubExcelPaths(octokit, owner, repo) {
     })[0];
   };
 
-  return {
-    irPath: configuredIrPath || pickLatest(irFiles) || '',
-    inventarioPath: configuredInventarioPath || pickLatest(inventarioFiles) || ''
-  };
+  const irPath = configuredIrPath || pickLatest(irFiles) || '';
+  const inventarioPath = configuredInventarioPath || pickLatest(inventarioFiles) || '';
+
+  if (!irPath || !inventarioPath) {
+    logGithubExcelStatus('Arquivo Excel não encontrado na raiz do repositório', {
+      irFound: Boolean(irPath),
+      inventarioFound: Boolean(inventarioPath),
+      irCandidates: irFiles.join(', ') || 'nenhum',
+      inventarioCandidates: inventarioFiles.join(', ') || 'nenhum'
+    });
+  } else {
+    logGithubExcelStatus('Arquivo Excel encontrado com sucesso', {
+      irPath,
+      inventarioPath
+    });
+  }
+
+  return { irPath, inventarioPath };
 }
 
 function buildGithubAccessErrorMessage(error, owner, repo) {
@@ -211,13 +249,18 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
     }
 
     const octokit = new Octokit({ auth: GITHUB_TOKEN });
+    console.log(`[GitHub] Conectado ao repositório ${owner}/${repo} e iniciando leitura dos arquivos Excel.`);
+
     const resolvedPaths = await resolveGithubExcelPaths(octokit, owner, repo);
     const irPath = normalizeGithubPath(resolvedPaths.irPath || process.env.GITHUB_PATH_IR || process.env.GITHUB_PATH || '');
     const inventarioPath = normalizeGithubPath(resolvedPaths.inventarioPath || process.env.GITHUB_PATH_INVENTARIO || process.env.GITHUB_PATH || '');
 
     if (!irPath || !inventarioPath) {
+      console.warn('[GitHub] Nenhum arquivo Excel IR_AREA ou INVENTARIO_IR foi encontrado na raiz do repositório.');
       return res.status(500).json({ error: 'Nenhum arquivo Excel IR_AREA ou INVENTARIO_IR encontrado na raiz do repositório do GitHub.' });
     }
+
+    console.log(`[GitHub] Arquivos Excel confirmados: IR_AREA=${irPath} | INVENTARIO=${inventarioPath}`);
 
     const [sharepointRows, irAreaRows, inventarioRows] = await Promise.all([
       fetchSharePointListRows(),
@@ -259,6 +302,8 @@ app.get('/api/test-github', async (req, res) => {
 
     const octokit = new Octokit({ auth: GITHUB_TOKEN });
     const response = await octokit.repos.get({ owner, repo });
+
+    console.log(`[GitHub] Conexão validada com sucesso para ${owner}/${repo}. Branch padrão: ${response?.data?.default_branch || 'indefinida'}.`);
 
     res.json({
       ok: true,
