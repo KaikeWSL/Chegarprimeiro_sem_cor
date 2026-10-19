@@ -103,12 +103,41 @@ async function fetchSharePointListRows() {
 }
 
 function parseWorkbookRows(buffer, fileName) {
+  if (!buffer) return [];
+
   const workbook = XLSX.read(buffer, { type: 'array' });
   const firstSheetName = workbook.SheetNames[0];
   if (!firstSheetName) return [];
+
   const firstSheet = workbook.Sheets[firstSheetName];
   const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: '', raw: false });
   return Array.isArray(rows) ? rows : [];
+}
+
+function readGitHubFileBuffer(response, fallbackBuffer = null) {
+  const payload = response?.data || response;
+  if (!payload || typeof payload !== 'object') {
+    return fallbackBuffer ? Buffer.from(fallbackBuffer) : null;
+  }
+
+  if (Buffer.isBuffer(payload)) {
+    return payload;
+  }
+
+  if (payload.content && typeof payload.content === 'string') {
+    const normalized = payload.content.replace(/\s+/g, '');
+    return normalized ? Buffer.from(normalized, 'base64') : null;
+  }
+
+  if (payload.data && typeof payload.data !== 'string') {
+    return readGitHubFileBuffer(payload.data, fallbackBuffer);
+  }
+
+  if (fallbackBuffer) {
+    return Buffer.from(fallbackBuffer);
+  }
+
+  return null;
 }
 
 async function fetchGitHubFileRows(filePath) {
@@ -118,13 +147,39 @@ async function fetchGitHubFileRows(filePath) {
   }
 
   const octokit = new Octokit({ auth: GITHUB_TOKEN });
-  const { data } = await octokit.repos.getContent({ owner: GITHUB_OWNER, repo: GITHUB_REPO, path: filePath });
+  const response = await octokit.repos.getContent({ owner: GITHUB_OWNER, repo: GITHUB_REPO, path: filePath });
+  const data = response?.data;
 
-  if (Array.isArray(data) || !data.content) {
+  if (Array.isArray(data)) {
     return [];
   }
 
-  const buffer = Buffer.from(data.content, 'base64');
+  if (data?.download_url) {
+    try {
+      const rawResponse = await fetch(data.download_url, {
+        headers: {
+          Authorization: `Bearer ${GITHUB_TOKEN}`,
+          Accept: 'application/octet-stream'
+        }
+      });
+
+      if (!rawResponse.ok) {
+        throw new Error(`GitHub raw download falhou: ${rawResponse.status}`);
+      }
+
+      const arrayBuffer = await rawResponse.arrayBuffer();
+      return parseWorkbookRows(Buffer.from(arrayBuffer), filePath);
+    } catch (error) {
+      console.error('[GitHub Excel] Falha ao baixar o arquivo binário do GitHub', error.message);
+      return [];
+    }
+  }
+
+  const buffer = readGitHubFileBuffer(data);
+  if (!buffer) {
+    return [];
+  }
+
   return parseWorkbookRows(buffer, filePath);
 }
 
@@ -382,4 +437,21 @@ app.post('/update-github', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
+if (require.main === module) {
+  app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+}
+
+module.exports = {
+  app,
+  parseWorkbookRows,
+  readGitHubFileBuffer,
+  fetchGitHubFileRows,
+  normalizeGithubPath,
+  getGithubRepoContext,
+  resolveGithubExcelPaths,
+  buildGithubAccessErrorMessage,
+  getSharePointConfig,
+  getGraphToken,
+  fetchSharePointListRows
+};
