@@ -154,8 +154,15 @@ async function fetchGitHubFileRows(filePath) {
     return [];
   }
 
+  const directBuffer = readGitHubFileBuffer(data);
+  if (directBuffer) {
+    console.log('[GitHub Excel] Lendo arquivo diretamente do conteúdo do GitHub em memória.', { filePath });
+    return parseWorkbookRows(directBuffer, filePath);
+  }
+
   if (data?.download_url) {
     try {
+      console.log('[GitHub Excel] Usando fallback de download_url porque o conteúdo direto não estava disponível.', { filePath, downloadUrl: data.download_url });
       const rawResponse = await fetch(data.download_url, {
         headers: {
           Authorization: `Bearer ${GITHUB_TOKEN}`,
@@ -170,17 +177,12 @@ async function fetchGitHubFileRows(filePath) {
       const arrayBuffer = await rawResponse.arrayBuffer();
       return parseWorkbookRows(Buffer.from(arrayBuffer), filePath);
     } catch (error) {
-      console.error('[GitHub Excel] Falha ao baixar o arquivo binário do GitHub', error.message);
+      console.error('[GitHub Excel] Falha ao abrir o arquivo via fallback de download', error.message);
       return [];
     }
   }
 
-  const buffer = readGitHubFileBuffer(data);
-  if (!buffer) {
-    return [];
-  }
-
-  return parseWorkbookRows(buffer, filePath);
+  return [];
 }
 
 function getGithubRepoContext(req) {
