@@ -43,7 +43,7 @@ function getSharePointConfig() {
     clientId: process.env.CLIENT_ID,
     clientSecret: process.env.CLIENT_SECRET,
     siteUrl: process.env.SHAREPOINT_SITE_URL,
-    listName: process.env.SHAREPOINT_LIST_NAME,
+    listName: process.env.SHAREPOINT_LIST_NAME || 'Inventario_Gpon',
     listFields: process.env.SHAREPOINT_LIST_FIELDS || ''
   };
 }
