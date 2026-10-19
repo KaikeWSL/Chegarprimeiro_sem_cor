@@ -43,12 +43,12 @@ function normalizeSharePointListName(value) {
 }
 
 function getSharePointConfig() {
-  const primaryListName = normalizeSharePointListName(process.env.SHAREPOINT_LIST_NAME || 'Inventario_Gpon');
+  const primaryListName = normalizeSharePointListName(process.env.SHAREPOINT_LIST_NAME || 'ResumoDashInventario');
   const secondaryListName = normalizeSharePointListName(
     process.env.SHAREPOINT_SECONDARY_LIST_NAME ||
     process.env.SHAREPOINT_FALLBACK_LIST_NAME ||
     process.env.SHAREPOINT_LIST_NAME_2 ||
-    ''
+    'Inventario_Gpon'
   );
 
   return {
@@ -402,11 +402,13 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
 
     const sharepointConfig = getSharePointConfig();
     const extractionDate = getLatestExcelDateFromPaths([irPath, inventarioPath]);
+    const dashboardSharepointRows = secondaryListName ? secondarySharepointRows : sharepointRows;
+    const dashboardListName = secondaryListName || primaryListName;
 
     res.json({
       ok: true,
       rows: {
-        sharepoint: sharepointRows,
+        sharepoint: dashboardSharepointRows,
         sharepointSecondary: secondarySharepointRows,
         irArea: irAreaRows,
         inventario: inventarioRows,
@@ -417,7 +419,9 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
         sharepoint: {
           siteUrl: sharepointConfig.siteUrl,
           listName: primaryListName,
-          secondaryListName: secondaryListName || null
+          secondaryListName: secondaryListName || null,
+          dashboardListName,
+          sourceUsed: dashboardListName
         }
       },
       extractionDate: extractionDate ? extractionDate.toISOString() : null
