@@ -43,12 +43,21 @@ function normalizeSharePointListName(value) {
 }
 
 function getSharePointConfig() {
+  const primaryListName = normalizeSharePointListName(process.env.SHAREPOINT_LIST_NAME || 'Inventario_Gpon');
+  const secondaryListName = normalizeSharePointListName(
+    process.env.SHAREPOINT_SECONDARY_LIST_NAME ||
+    process.env.SHAREPOINT_FALLBACK_LIST_NAME ||
+    process.env.SHAREPOINT_LIST_NAME_2 ||
+    ''
+  );
+
   return {
     tenantId: process.env.TENANT_ID,
     clientId: process.env.CLIENT_ID,
     clientSecret: process.env.CLIENT_SECRET,
     siteUrl: process.env.SHAREPOINT_SITE_URL,
-    listName: normalizeSharePointListName(process.env.SHAREPOINT_LIST_NAME || 'Inventario_Gpon'),
+    listName: primaryListName,
+    secondaryListName,
     listFields: process.env.SHAREPOINT_LIST_FIELDS || ''
   };
 }
@@ -81,8 +90,9 @@ async function getGraphToken() {
   return data.access_token;
 }
 
-async function fetchSharePointListRows() {
-  const { siteUrl, listName } = getSharePointConfig();
+async function fetchSharePointListRows(listNameOverride) {
+  const { siteUrl, listName: primaryListName, secondaryListName } = getSharePointConfig();
+  const listName = normalizeSharePointListName(listNameOverride || primaryListName || secondaryListName || 'Inventario_Gpon');
   if (!siteUrl || !listName) {
     throw new Error('SHAREPOINT_SITE_URL e SHAREPOINT_LIST_NAME não configurados no Render.');
   }
@@ -124,6 +134,19 @@ async function fetchSharePointListRows() {
   }
 
   return rows;
+}
+
+async function fetchSharePointLists() {
+  const { primaryListName, secondaryListName } = getSharePointConfig();
+  const primaryRows = await fetchSharePointListRows(primaryListName);
+  const secondaryRows = secondaryListName ? await fetchSharePointListRows(secondaryListName) : [];
+
+  return {
+    primary: primaryRows,
+    secondary: secondaryRows,
+    primaryListName,
+    secondaryListName
+  };
 }
 
 function parseWorkbookRows(buffer, fileName) {
@@ -328,8 +351,17 @@ function buildGithubAccessErrorMessage(error, owner, repo) {
 
 app.get('/api/sharepoint-list', async (req, res) => {
   try {
-    const rows = await fetchSharePointListRows();
-    res.json({ ok: true, count: rows.length, rows });
+    const { primaryListName, secondaryListName, primary, secondary } = await fetchSharePointLists();
+    res.json({
+      ok: true,
+      primaryListName,
+      secondaryListName,
+      count: primary.length,
+      rows: primary,
+      secondaryRows: secondary,
+      primaryRows: primary,
+      secondaryCount: secondary.length
+    });
   } catch (error) {
     console.error('sharepoint-list-error', error.message);
     res.status(500).json({ error: error.message });
@@ -362,8 +394,8 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
 
     console.log(`[GitHub] Arquivos Excel confirmados: IR_AREA=${irPath} | INVENTARIO=${inventarioPath}`);
 
-    const [sharepointRows, irAreaRows, inventarioRows] = await Promise.all([
-      fetchSharePointListRows(),
+    const [{ primary: sharepointRows, secondary: secondarySharepointRows, primaryListName, secondaryListName }, irAreaRows, inventarioRows] = await Promise.all([
+      fetchSharePointLists(),
       fetchGitHubFileRows(irPath),
       fetchGitHubFileRows(inventarioPath)
     ]);
@@ -375,6 +407,7 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
       ok: true,
       rows: {
         sharepoint: sharepointRows,
+        sharepointSecondary: secondarySharepointRows,
         irArea: irAreaRows,
         inventario: inventarioRows,
       },
@@ -383,7 +416,8 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
         inventarioPath,
         sharepoint: {
           siteUrl: sharepointConfig.siteUrl,
-          listName: sharepointConfig.listName
+          listName: primaryListName,
+          secondaryListName: secondaryListName || null
         }
       },
       extractionDate: extractionDate ? extractionDate.toISOString() : null
