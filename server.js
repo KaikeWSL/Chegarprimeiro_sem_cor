@@ -99,13 +99,24 @@ function getAccessControlState(serialNumber, userName = '') {
     return sameSerial || sameName;
   });
 
-  return {
+  const state = {
     enabled: Boolean(config?.enabled !== false),
     isAuthorized: Boolean(userMatch && userMatch.authorized),
     canApprove: Boolean(userMatch && userMatch.canApprove),
     user: userMatch || null,
     users: config?.users || []
   };
+
+  console.log('[AccessControl] Verificando acesso', {
+    serialNumber: String(serialNumber || ''),
+    userName: String(userName || ''),
+    normalizedSerial,
+    normalizedUserName,
+    matchedUser: userMatch ? { name: userMatch.name, serialNumber: userMatch.serialNumber, authorized: userMatch.authorized, canApprove: userMatch.canApprove } : null,
+    state
+  });
+
+  return state;
 }
 
 function isAccessRequestAllowed(req) {
@@ -619,8 +630,17 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
 app.get('/api/update-access/status', (req, res) => {
   try {
     const state = isAccessRequestAllowed(req);
+    console.log('[AccessControl] status', {
+      origin: req.headers.origin || 'sem-origin',
+      serialNumber: state.serialNumber,
+      userName: state.userName,
+      isAuthorized: state.isAuthorized,
+      canApprove: state.canApprove,
+      users: state.users?.map((user) => ({ name: user.name, serialNumber: user.serialNumber, authorized: user.authorized, canApprove: user.canApprove })) || []
+    });
     res.json({ ok: true, access: state });
   } catch (error) {
+    console.error('[AccessControl] Erro no status', error);
     res.status(500).json({ error: error.message || 'Erro ao verificar autorização.' });
   }
 });
@@ -631,6 +651,14 @@ app.post('/api/update-access/request', (req, res) => {
     const requestName = String(name || req.headers['x-user-name'] || '').trim();
     const requestSerial = String(serialNumber || req.headers['x-machine-serial'] || '').trim();
 
+    console.log('[AccessControl] nova solicitação', {
+      requestName,
+      requestSerial,
+      bodySerial: String(serialNumber || ''),
+      headerSerial: String(req.headers['x-machine-serial'] || ''),
+      pendingRequests: getPendingAccessRequests()
+    });
+
     if (!requestName || !requestSerial) {
       return res.status(400).json({ error: 'Nome e serial da máquina são obrigatórios.' });
     }
@@ -638,6 +666,11 @@ app.post('/api/update-access/request', (req, res) => {
     const pendingRequests = getPendingAccessRequests();
     const exists = pendingRequests.some((request) => normalizeAccessKey(request.serialNumber) === normalizeAccessKey(requestSerial));
     if (exists) {
+      console.warn('[AccessControl] conflito 409 em solicitação', {
+        requestName,
+        requestSerial,
+        pendingRequests
+      });
       return res.status(409).json({ error: 'Já existe uma solicitação pendente para esse computador.' });
     }
 
