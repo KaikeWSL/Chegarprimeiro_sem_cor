@@ -41,6 +41,11 @@ function normalizeAccessKey(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function isClaroEmail(email) {
+  const normalized = String(email || '').trim().toLowerCase();
+  return Boolean(normalized) && normalized.endsWith('@claro.com.br');
+}
+
 function readJsonFile(filePath, fallbackValue) {
   try {
     if (!fs.existsSync(filePath)) {
@@ -665,6 +670,10 @@ app.post('/api/update-access/login', (req, res) => {
       return res.status(400).json({ error: 'E-mail e senha são obrigatórios.' });
     }
 
+    if (!isClaroEmail(requestEmail)) {
+      return res.status(400).json({ error: 'Use um e-mail com domínio @claro.com.br.' });
+    }
+
     const user = getUserByCredentials(requestEmail, requestPassword);
     if (!user) {
       return res.status(401).json({ error: 'E-mail ou senha inválidos.' });
@@ -692,6 +701,10 @@ app.post('/api/update-access/request', (req, res) => {
 
     if (!requestName || !requestEmail || !requestPassword) {
       return res.status(400).json({ error: 'Nome, e-mail e senha são obrigatórios.' });
+    }
+
+    if (!isClaroEmail(requestEmail)) {
+      return res.status(400).json({ error: 'Use um e-mail com domínio @claro.com.br.' });
     }
 
     const config = getAccessControlConfig();
