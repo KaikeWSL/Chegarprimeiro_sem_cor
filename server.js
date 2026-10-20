@@ -8,8 +8,117 @@ require('dotenv').config();
 
 const app = express();
 const uploadDir = path.join(__dirname, 'uploads');
+const configDir = path.join(__dirname, 'config');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
 const upload = multer({ dest: uploadDir });
+const accessControlFile = path.join(configDir, 'access-control.json');
+const accessRequestsFile = path.join(configDir, 'access-requests.json');
+
+const DEFAULT_ACCESS_CONTROL = {
+  enabled: true,
+  users: [
+    {
+      name: 'Administrador local',
+      serialNumber: 'SERIAL-001',
+      authorized: true,
+      canApprove: true,
+      notes: 'Usuário com permissão para liberar outros computadores.'
+    },
+    {
+      name: 'Usuário autorizado',
+      serialNumber: 'SERIAL-002',
+      authorized: true,
+      canApprove: false,
+      notes: 'Usuário com permissão para atualizar o SGD.'
+    }
+  ]
+};
+
+function normalizeAccessKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function readJsonFile(filePath, fallbackValue) {
+  try {
+    if (!fs.existsSync(filePath)) {
+      fs.writeFileSync(filePath, JSON.stringify(fallbackValue, null, 2));
+      return fallbackValue;
+    }
+    const raw = fs.readFileSync(filePath, 'utf8');
+    if (!raw || !raw.trim()) {
+      fs.writeFileSync(filePath, JSON.stringify(fallbackValue, null, 2));
+      return fallbackValue;
+    }
+    return JSON.parse(raw);
+  } catch (error) {
+    console.warn('[AccessControl] Falha ao ler arquivo de configuração, usando fallback local.', filePath);
+    return fallbackValue;
+  }
+}
+
+function getAccessControlConfig() {
+  const envUsers = process.env.UPDATE_ACCESS_USERS || process.env.ACCESS_CONTROL_USERS || '';
+  const fallback = readJsonFile(accessControlFile, DEFAULT_ACCESS_CONTROL);
+
+  if (!envUsers) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(envUsers);
+    return {
+      enabled: true,
+      users: Array.isArray(parsed) ? parsed : fallback.users
+    };
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function saveAccessControlConfig(config) {
+  fs.writeFileSync(accessControlFile, JSON.stringify(config, null, 2));
+}
+
+function getPendingAccessRequests() {
+  const fallback = [];
+  return readJsonFile(accessRequestsFile, fallback);
+}
+
+function savePendingAccessRequests(requests) {
+  fs.writeFileSync(accessRequestsFile, JSON.stringify(Array.isArray(requests) ? requests : [], null, 2));
+}
+
+function getAccessControlState(serialNumber, userName = '') {
+  const config = getAccessControlConfig();
+  const normalizedSerial = normalizeAccessKey(serialNumber);
+  const normalizedUserName = normalizeAccessKey(userName);
+  const userMatch = (config?.users || []).find((user) => {
+    const sameSerial = normalizeAccessKey(user.serialNumber) === normalizedSerial;
+    const sameName = normalizeAccessKey(user.name) === normalizedUserName;
+    return sameSerial || sameName;
+  });
+
+  return {
+    enabled: Boolean(config?.enabled !== false),
+    isAuthorized: Boolean(userMatch && userMatch.authorized),
+    canApprove: Boolean(userMatch && userMatch.canApprove),
+    user: userMatch || null,
+    users: config?.users || []
+  };
+}
+
+function isAccessRequestAllowed(req) {
+  const serialNumber = req.headers['x-machine-serial'] || req.body?.serialNumber || req.query?.serialNumber || '';
+  const userName = req.headers['x-user-name'] || req.body?.name || req.query?.name || '';
+
+  const state = getAccessControlState(serialNumber, userName);
+  return {
+    ...state,
+    serialNumber: String(serialNumber || ''),
+    userName: String(userName || '')
+  };
+}
 
 const allowedOrigins = [
   'https://dashboardinventariogpon.netlify.app',
@@ -287,23 +396,64 @@ function extractDatePrefix(fileName) {
   return match ? Number(match[1]) : 0;
 }
 
-function getLatestExcelDateFromPaths(paths = []) {
-  const dates = (paths || [])
-    .map((value) => {
-      const fileName = String(value || '').split('/').pop();
-      return extractDatePrefix(fileName);
-    })
-    .filter((value) => Number.isFinite(value) && value > 0)
-    .sort((a, b) => b - a);
+async function getLatestGithubFileDate(octokit, owner, repo, filePath) {
+  if (!octokit || !owner || !repo || !filePath) return null;
+
+  try {
+    const response = await octokit.repos.listCommits({
+      owner,
+      repo,
+      path: normalizeGithubPath(filePath),
+      per_page: 1,
+    });
+
+    const latestCommit = Array.isArray(response?.data) ? response.data[0] : null;
+    const commitDate = latestCommit?.commit?.author?.date || latestCommit?.commit?.committer?.date;
+    if (commitDate) {
+      const parsed = new Date(commitDate);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed;
+      }
+    }
+  } catch (error) {
+    console.warn('[GitHub Excel] Falha ao buscar data real do commit do arquivo.', {
+      filePath,
+      message: error?.message || 'unknown'
+    });
+  }
+
+  return null;
+}
+
+async function getLatestExcelDateFromPaths(paths = [], octokit = null, owner = null, repo = null) {
+  const dates = [];
+
+  for (const value of paths || []) {
+    const normalizedPath = String(value || '').trim();
+    if (!normalizedPath) continue;
+
+    const fileName = normalizedPath.split('/').pop();
+    const filePrefixDate = extractDatePrefix(fileName);
+    if (Number.isFinite(filePrefixDate) && filePrefixDate > 0) {
+      const isoDate = String(filePrefixDate);
+      const year = Number(isoDate.slice(0, 4));
+      const month = Number(isoDate.slice(4, 6)) - 1;
+      const day = Number(isoDate.slice(6, 8));
+      dates.push(new Date(year, month, day));
+    }
+
+    const githubDate = await getLatestGithubFileDate(octokit, owner, repo, normalizedPath);
+    if (githubDate) {
+      dates.push(githubDate);
+    }
+  }
 
   if (!dates.length) return null;
 
-  const isoDate = String(dates[0]);
-  const year = Number(isoDate.slice(0, 4));
-  const month = Number(isoDate.slice(4, 6)) - 1;
-  const day = Number(isoDate.slice(6, 8));
-
-  return new Date(year, month, day);
+  return dates.reduce((latest, current) => {
+    if (!latest || current > latest) return current;
+    return latest;
+  }, null);
 }
 
 function logGithubExcelStatus(stage, details = {}) {
@@ -439,7 +589,7 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
     ]);
 
     const sharepointConfig = getSharePointConfig();
-    const extractionDate = getLatestExcelDateFromPaths([irPath, inventarioPath]);
+    const extractionDate = await getLatestExcelDateFromPaths([irPath, inventarioPath], octokit, owner, repo);
 
     res.json({
       ok: true,
@@ -463,6 +613,96 @@ app.get('/api/latest-dashboard-data', async (req, res) => {
   } catch (error) {
     console.error('latest-dashboard-data-error', error.message);
     res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/update-access/status', (req, res) => {
+  try {
+    const state = isAccessRequestAllowed(req);
+    res.json({ ok: true, access: state });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Erro ao verificar autorização.' });
+  }
+});
+
+app.post('/api/update-access/request', (req, res) => {
+  try {
+    const { name, serialNumber } = req.body || {};
+    const requestName = String(name || req.headers['x-user-name'] || '').trim();
+    const requestSerial = String(serialNumber || req.headers['x-machine-serial'] || '').trim();
+
+    if (!requestName || !requestSerial) {
+      return res.status(400).json({ error: 'Nome e serial da máquina são obrigatórios.' });
+    }
+
+    const pendingRequests = getPendingAccessRequests();
+    const exists = pendingRequests.some((request) => normalizeAccessKey(request.serialNumber) === normalizeAccessKey(requestSerial));
+    if (exists) {
+      return res.status(409).json({ error: 'Já existe uma solicitação pendente para esse computador.' });
+    }
+
+    const nextRequest = {
+      id: `req-${Date.now()}`,
+      name: requestName,
+      serialNumber: requestSerial,
+      requestedAt: new Date().toISOString(),
+      status: 'pending'
+    };
+
+    pendingRequests.push(nextRequest);
+    savePendingAccessRequests(pendingRequests);
+
+    res.json({ ok: true, request: nextRequest });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Erro ao registrar solicitação de acesso.' });
+  }
+});
+
+app.get('/api/update-access/requests', (req, res) => {
+  const requests = getPendingAccessRequests();
+  res.json({ ok: true, requests });
+});
+
+app.post('/api/update-access/approve', (req, res) => {
+  try {
+    const { requestId, approved = true, actorSerialNumber, actorName } = req.body || {};
+    const actor = getAccessControlState(actorSerialNumber || req.headers['x-machine-serial'] || '', actorName || req.headers['x-user-name'] || '');
+
+    if (!actor.isAuthorized || !actor.canApprove) {
+      return res.status(403).json({ error: 'Você não tem permissão para autorizar acessos.' });
+    }
+
+    const pendingRequests = getPendingAccessRequests();
+    const foundRequest = pendingRequests.find((request) => request.id === requestId);
+    if (!foundRequest) {
+      return res.status(404).json({ error: 'Solicitação não encontrada.' });
+    }
+
+    const config = getAccessControlConfig();
+    const nextUsers = Array.isArray(config.users) ? [...config.users] : [];
+    const index = nextUsers.findIndex((user) => normalizeAccessKey(user.serialNumber) === normalizeAccessKey(foundRequest.serialNumber));
+
+    if (approved) {
+      if (index >= 0) {
+        nextUsers[index] = { ...nextUsers[index], name: foundRequest.name, serialNumber: foundRequest.serialNumber, authorized: true, canApprove: false };
+      } else {
+        nextUsers.push({
+          name: foundRequest.name,
+          serialNumber: foundRequest.serialNumber,
+          authorized: true,
+          canApprove: false,
+          notes: 'Acesso liberado pela aprovação de um usuário autorizado.'
+        });
+      }
+    }
+
+    const filteredRequests = pendingRequests.filter((request) => request.id !== requestId);
+    savePendingAccessRequests(filteredRequests);
+    saveAccessControlConfig({ ...config, enabled: true, users: nextUsers });
+
+    res.json({ ok: true, approved: Boolean(approved), users: nextUsers, request: foundRequest });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Erro ao aprovar solicitação.' });
   }
 });
 
@@ -513,6 +753,14 @@ app.post('/update-github', async (req, res) => {
     const { fileName, originalname } = req.body;
     const { GITHUB_TOKEN, GITHUB_PATH, GITHUB_PATH_IR, GITHUB_PATH_INVENTARIO } = process.env;
     if (!GITHUB_TOKEN) return res.status(500).json({ error: 'GITHUB_TOKEN not set' });
+
+    const accessState = isAccessRequestAllowed(req);
+    if (!accessState.enabled || !accessState.isAuthorized) {
+      return res.status(403).json({
+        error: 'Acesso de atualização negado para este computador/usuário. Solicite autorização antes de atualizar o SGD.',
+        access: accessState
+      });
+    }
 
     const { owner, repo } = getGithubRepoContext(req);
     if (!owner || !repo) {

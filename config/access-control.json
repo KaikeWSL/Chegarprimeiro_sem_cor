@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "users": [
+    {
+      "name": "Administrador local",
+      "serialNumber": "SERIAL-001",
+      "authorized": true,
+      "canApprove": true,
+      "notes": "Usuário com permissão para liberar outros computadores."
+    },
+    {
+      "name": "Usuário autorizado",
+      "serialNumber": "SERIAL-002",
+      "authorized": true,
+      "canApprove": false,
+      "notes": "Usuário com permissão para atualizar o SGD."
+    }
+  ]
+}
