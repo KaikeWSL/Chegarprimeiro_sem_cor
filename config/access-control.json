@@ -3,14 +3,16 @@
   "users": [
     {
       "name": "Kaike Wesley",
-      "serialNumber": "C5215V3",
+      "email": "Kaike.santos.terceiros@claro.com.br",
+      "password": "Kaike25721005",
       "authorized": true,
       "canApprove": true,
-      "notes": "Usuário com permissão para liberar outros computadores."
+      "notes": "Usuário com permissão para liberar acesso de outras pessoas."
     },
     {
       "name": "Usuário autorizado",
-      "serialNumber": "SERIAL-002",
+      "email": "usuario@empresa.com",
+      "password": "usuario123",
       "authorized": true,
       "canApprove": false,
       "notes": "Usuário com permissão para atualizar o SGD."

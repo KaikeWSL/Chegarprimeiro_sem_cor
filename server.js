@@ -19,15 +19,17 @@ const DEFAULT_ACCESS_CONTROL = {
   enabled: true,
   users: [
     {
-      name: 'Administrador local',
-      serialNumber: 'SERIAL-001',
+      name: 'Administrador',
+      email: 'admin@empresa.com',
+      password: 'admin123',
       authorized: true,
       canApprove: true,
-      notes: 'Usuário com permissão para liberar outros computadores.'
+      notes: 'Usuário com permissão para liberar acesso de outras pessoas.'
     },
     {
       name: 'Usuário autorizado',
-      serialNumber: 'SERIAL-002',
+      email: 'usuario@empresa.com',
+      password: 'usuario123',
       authorized: true,
       canApprove: false,
       notes: 'Usuário com permissão para atualizar o SGD.'
@@ -89,30 +91,39 @@ function savePendingAccessRequests(requests) {
   fs.writeFileSync(accessRequestsFile, JSON.stringify(Array.isArray(requests) ? requests : [], null, 2));
 }
 
-function getAccessControlState(serialNumber, userName = '') {
+function getUserByCredentials(email, password = '') {
   const config = getAccessControlConfig();
-  const normalizedSerial = normalizeAccessKey(serialNumber);
-  const normalizedUserName = normalizeAccessKey(userName);
-  const userMatch = (config?.users || []).find((user) => {
-    const sameSerial = normalizeAccessKey(user.serialNumber) === normalizedSerial;
-    const sameName = normalizeAccessKey(user.name) === normalizedUserName;
-    return sameSerial || sameName;
-  });
+  const normalizedEmail = normalizeAccessKey(email);
+  const normalizedPassword = String(password || '').trim();
 
+  return (config?.users || []).find((user) => {
+    const matchesEmail = normalizeAccessKey(user.email) === normalizedEmail;
+    const matchesPassword = user.password === undefined || user.password === null || user.password === '' || String(user.password) === normalizedPassword;
+    return matchesEmail && matchesPassword;
+  }) || null;
+}
+
+function getAccessControlState(email, password = '') {
+  const config = getAccessControlConfig();
+  const normalizedEmail = normalizeAccessKey(email);
+  const userMatch = (config?.users || []).find((user) => normalizeAccessKey(user.email) === normalizedEmail);
+  const userByCredentials = userMatch && String(password || '').trim() !== '' && String(userMatch.password || '') === String(password || '')
+    ? userMatch
+    : null;
+
+  const finalMatch = userByCredentials || userMatch || null;
   const state = {
     enabled: Boolean(config?.enabled !== false),
-    isAuthorized: Boolean(userMatch && userMatch.authorized),
-    canApprove: Boolean(userMatch && userMatch.canApprove),
-    user: userMatch || null,
+    isAuthorized: Boolean(finalMatch && finalMatch.authorized),
+    canApprove: Boolean(finalMatch && finalMatch.canApprove),
+    user: finalMatch || null,
     users: config?.users || []
   };
 
   console.log('[AccessControl] Verificando acesso', {
-    serialNumber: String(serialNumber || ''),
-    userName: String(userName || ''),
-    normalizedSerial,
-    normalizedUserName,
-    matchedUser: userMatch ? { name: userMatch.name, serialNumber: userMatch.serialNumber, authorized: userMatch.authorized, canApprove: userMatch.canApprove } : null,
+    email: String(email || ''),
+    normalizedEmail,
+    matchedUser: finalMatch ? { name: finalMatch.name, email: finalMatch.email, authorized: finalMatch.authorized, canApprove: finalMatch.canApprove } : null,
     state
   });
 
@@ -120,14 +131,14 @@ function getAccessControlState(serialNumber, userName = '') {
 }
 
 function isAccessRequestAllowed(req) {
-  const serialNumber = req.headers['x-machine-serial'] || req.body?.serialNumber || req.query?.serialNumber || '';
-  const userName = req.headers['x-user-name'] || req.body?.name || req.query?.name || '';
+  const email = req.headers['x-user-email'] || req.body?.email || req.query?.email || '';
+  const password = req.headers['x-user-password'] || req.body?.password || req.query?.password || '';
 
-  const state = getAccessControlState(serialNumber, userName);
+  const state = getAccessControlState(email, password);
   return {
     ...state,
-    serialNumber: String(serialNumber || ''),
-    userName: String(userName || '')
+    email: String(email || ''),
+    password: String(password || '')
   };
 }
 
@@ -144,7 +155,7 @@ app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-machine-serial, x-user-name');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-user-email, x-user-password, x-user-name');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 
   if (req.method === 'OPTIONS') {
@@ -632,11 +643,10 @@ app.get('/api/update-access/status', (req, res) => {
     const state = isAccessRequestAllowed(req);
     console.log('[AccessControl] status', {
       origin: req.headers.origin || 'sem-origin',
-      serialNumber: state.serialNumber,
-      userName: state.userName,
+      email: state.email,
       isAuthorized: state.isAuthorized,
       canApprove: state.canApprove,
-      users: state.users?.map((user) => ({ name: user.name, serialNumber: user.serialNumber, authorized: user.authorized, canApprove: user.canApprove })) || []
+      users: state.users?.map((user) => ({ name: user.name, email: user.email, authorized: user.authorized, canApprove: user.canApprove })) || []
     });
     res.json({ ok: true, access: state });
   } catch (error) {
@@ -645,39 +655,68 @@ app.get('/api/update-access/status', (req, res) => {
   }
 });
 
+app.post('/api/update-access/login', (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    const requestEmail = String(email || req.headers['x-user-email'] || '').trim();
+    const requestPassword = String(password || req.headers['x-user-password'] || '').trim();
+
+    if (!requestEmail || !requestPassword) {
+      return res.status(400).json({ error: 'E-mail e senha são obrigatórios.' });
+    }
+
+    const user = getUserByCredentials(requestEmail, requestPassword);
+    if (!user) {
+      return res.status(401).json({ error: 'E-mail ou senha inválidos.' });
+    }
+
+    res.json({ ok: true, user: { name: user.name, email: user.email, authorized: user.authorized, canApprove: user.canApprove } });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Erro ao autenticar usuário.' });
+  }
+});
+
 app.post('/api/update-access/request', (req, res) => {
   try {
-    const { name, serialNumber } = req.body || {};
+    const { name, email, password } = req.body || {};
     const requestName = String(name || req.headers['x-user-name'] || '').trim();
-    const requestSerial = String(serialNumber || req.headers['x-machine-serial'] || '').trim();
+    const requestEmail = String(email || req.headers['x-user-email'] || '').trim();
+    const requestPassword = String(password || req.headers['x-user-password'] || '').trim();
 
     console.log('[AccessControl] nova solicitação', {
       requestName,
-      requestSerial,
-      bodySerial: String(serialNumber || ''),
-      headerSerial: String(req.headers['x-machine-serial'] || ''),
+      requestEmail,
+      hasPassword: !!requestPassword,
       pendingRequests: getPendingAccessRequests()
     });
 
-    if (!requestName || !requestSerial) {
-      return res.status(400).json({ error: 'Nome e serial da máquina são obrigatórios.' });
+    if (!requestName || !requestEmail || !requestPassword) {
+      return res.status(400).json({ error: 'Nome, e-mail e senha são obrigatórios.' });
     }
 
+    const config = getAccessControlConfig();
     const pendingRequests = getPendingAccessRequests();
-    const exists = pendingRequests.some((request) => normalizeAccessKey(request.serialNumber) === normalizeAccessKey(requestSerial));
+    const alreadyAuthorized = (config?.users || []).some((user) => normalizeAccessKey(user.email) === normalizeAccessKey(requestEmail));
+    const exists = pendingRequests.some((request) => normalizeAccessKey(request.email) === normalizeAccessKey(requestEmail));
+
+    if (alreadyAuthorized) {
+      return res.status(409).json({ error: 'Este e-mail já está autorizado.' });
+    }
+
     if (exists) {
       console.warn('[AccessControl] conflito 409 em solicitação', {
         requestName,
-        requestSerial,
+        requestEmail,
         pendingRequests
       });
-      return res.status(409).json({ error: 'Já existe uma solicitação pendente para esse computador.' });
+      return res.status(409).json({ error: 'Já existe uma solicitação pendente para este e-mail.' });
     }
 
     const nextRequest = {
       id: `req-${Date.now()}`,
       name: requestName,
-      serialNumber: requestSerial,
+      email: requestEmail,
+      password: requestPassword,
       requestedAt: new Date().toISOString(),
       status: 'pending'
     };
@@ -698,8 +737,8 @@ app.get('/api/update-access/requests', (req, res) => {
 
 app.post('/api/update-access/approve', (req, res) => {
   try {
-    const { requestId, approved = true, actorSerialNumber, actorName } = req.body || {};
-    const actor = getAccessControlState(actorSerialNumber || req.headers['x-machine-serial'] || '', actorName || req.headers['x-user-name'] || '');
+    const { requestId, approved = true, actorEmail, actorPassword } = req.body || {};
+    const actor = getAccessControlState(actorEmail || req.headers['x-user-email'] || '', actorPassword || req.headers['x-user-password'] || '');
 
     if (!actor.isAuthorized || !actor.canApprove) {
       return res.status(403).json({ error: 'Você não tem permissão para autorizar acessos.' });
@@ -713,15 +752,16 @@ app.post('/api/update-access/approve', (req, res) => {
 
     const config = getAccessControlConfig();
     const nextUsers = Array.isArray(config.users) ? [...config.users] : [];
-    const index = nextUsers.findIndex((user) => normalizeAccessKey(user.serialNumber) === normalizeAccessKey(foundRequest.serialNumber));
+    const index = nextUsers.findIndex((user) => normalizeAccessKey(user.email) === normalizeAccessKey(foundRequest.email));
 
     if (approved) {
       if (index >= 0) {
-        nextUsers[index] = { ...nextUsers[index], name: foundRequest.name, serialNumber: foundRequest.serialNumber, authorized: true, canApprove: false };
+        nextUsers[index] = { ...nextUsers[index], name: foundRequest.name, email: foundRequest.email, password: foundRequest.password, authorized: true, canApprove: false };
       } else {
         nextUsers.push({
           name: foundRequest.name,
-          serialNumber: foundRequest.serialNumber,
+          email: foundRequest.email,
+          password: foundRequest.password,
           authorized: true,
           canApprove: false,
           notes: 'Acesso liberado pela aprovação de um usuário autorizado.'
@@ -790,7 +830,7 @@ app.post('/update-github', async (req, res) => {
     const accessState = isAccessRequestAllowed(req);
     if (!accessState.enabled || !accessState.isAuthorized) {
       return res.status(403).json({
-        error: 'Acesso de atualização negado para este computador/usuário. Solicite autorização antes de atualizar o SGD.',
+        error: 'Acesso de atualização negado para este usuário. Faça login com um e-mail autorizado antes de atualizar o SGD.',
         access: accessState
       });
     }
