@@ -10,11 +10,11 @@
       "notes": "Usuário com permissão para liberar acesso de outras pessoas."
     },
     {
-      "name": "Usuário autorizado",
-      "email": "usuario@empresa.com",
-      "password": "usuario123",
+      "name": "André Rodrigues",
+      "email": "andre.dasilvarodrigues@claro.com.br",
+      "password": "1234",
       "authorized": true,
-      "canApprove": false,
+      "canApprove": true,
       "notes": "Usuário com permissão para atualizar o SGD."
     }
   ]
