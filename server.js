@@ -99,28 +99,54 @@ async function fetchSharePointListRows(listNameOverride) {
 
   const site = new URL(siteUrl);
   const sitePath = site.pathname.replace(/\/$/, '');
-  const graphUrl = `https://graph.microsoft.com/v1.0/sites/${site.hostname}:${sitePath}:/lists/${encodeURIComponent(listName)}/items?$expand=fields&$top=1000`;
   const token = await getGraphToken();
+  const pageLimit = 1000;
+  let nextUrl = `https://graph.microsoft.com/v1.0/sites/${site.hostname}:${sitePath}:/lists/${encodeURIComponent(listName)}/items?$expand=fields&$top=${pageLimit}`;
+  const rows = [];
+  let page = 0;
 
   console.log('[SharePoint] Consultando lista', {
     siteUrl,
     listName,
-    graphUrl
+    pageLimit,
+    initialUrl: nextUrl
   });
 
-  const response = await fetch(graphUrl, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json'
+  while (nextUrl) {
+    page += 1;
+    const response = await fetch(nextUrl, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json'
+      }
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data?.error?.message || 'Erro ao consultar lista do SharePoint.');
     }
-  });
 
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data?.error?.message || 'Erro ao consultar lista do SharePoint.');
+    const currentPageRows = Array.isArray(data.value) ? data.value.map((item) => item.fields || {}) : [];
+    rows.push(...currentPageRows);
+
+    console.log('[SharePoint PAGINATION]', {
+      listName,
+      page,
+      pageLimit,
+      fetchedThisPage: currentPageRows.length,
+      accumulatedRows: rows.length,
+      hasNextLink: Boolean(data?.['@odata.nextLink']),
+      nextLink: data?.['@odata.nextLink'] || null
+    });
+
+    nextUrl = data?.['@odata.nextLink'] || null;
+
+    if (page >= 50) {
+      console.warn('[SharePoint PAGINATION] Limite máximo de paginação atingido para evitar loop infinito.', { listName, page, accumulatedRows: rows.length });
+      break;
+    }
   }
 
-  const rows = Array.isArray(data.value) ? data.value.map((item) => item.fields || {}) : [];
   if (rows.length) {
     const sampleKeys = Object.keys(rows[0]);
     console.log('[SharePoint] Lista retornada com sucesso', {
@@ -129,8 +155,20 @@ async function fetchSharePointListRows(listNameOverride) {
       sampleKeys,
       firstRow: rows[0]
     });
+    console.log('[SharePoint TOTAL BEFORE FILTER]', {
+      listName,
+      totalReceivedBeforeFilter: rows.length,
+      pageCount: page,
+      sampleKeys
+    });
   } else {
     console.warn('[SharePoint] Lista retornou zero registros', { listName, siteUrl });
+    console.log('[SharePoint TOTAL BEFORE FILTER]', {
+      listName,
+      totalReceivedBeforeFilter: 0,
+      pageCount: page,
+      sampleKeys: []
+    });
   }
 
   return rows;
