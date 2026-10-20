@@ -2,8 +2,8 @@
   "enabled": true,
   "users": [
     {
-      "name": "Administrador local",
-      "serialNumber": "SERIAL-001",
+      "name": "Kaike Wesley",
+      "serialNumber": "C5215V3",
       "authorized": true,
       "canApprove": true,
       "notes": "Usuário com permissão para liberar outros computadores."
