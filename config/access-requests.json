@@ -54,5 +54,13 @@
     "password": "1",
     "requestedAt": "2026-10-21T11:39:44.755Z",
     "status": "pending"
+  },
+  {
+    "id": "req-1792583095409",
+    "name": "dawdawd",
+    "email": "Kaike.welsey1dd2@claro.com.br",
+    "password": "123",
+    "requestedAt": "2026-10-21T11:44:55.409Z",
+    "status": "pending"
   }
 ]
