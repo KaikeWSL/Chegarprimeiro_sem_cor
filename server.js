@@ -1535,6 +1535,282 @@ app.get('/api/test-smtp-verify-587', async (req, res) => {
   return res.json({ ...result, summary });
 });
 
+app.get('/api/diagnostics/dns', async (req, res) => {
+  console.log('[DNS] Iniciando teste');
+  const startedAt = Date.now();
+
+  try {
+    const result = await testDnsResolution('smtp.gmail.com');
+    const elapsedMs = Date.now() - startedAt;
+    console.log('[DNS] Endereços encontrados', { hostname: 'smtp.gmail.com', addresses: result.addresses || [], elapsedMs });
+    console.log('[DNS] Tempo de resolução', { hostname: 'smtp.gmail.com', elapsedMs });
+
+    return res.json({
+      ok: Boolean(result.ok),
+      hostname: 'smtp.gmail.com',
+      addresses: result.addresses || [],
+      elapsedMs,
+      resolvedIp: result.usedIp || null,
+      code: result.code || null,
+      message: result.message || null
+    });
+  } catch (error) {
+    console.error('[DNS] Erro no teste', {
+      message: error.message || 'unknown',
+      code: error.code || null,
+      errno: error.errno || null,
+      syscall: error.syscall || null,
+      hostname: 'smtp.gmail.com',
+      address: null,
+      port: null,
+      stack: error.stack || null
+    });
+
+    return res.status(500).json({
+      ok: false,
+      hostname: 'smtp.gmail.com',
+      message: error.message || 'Erro ao resolver DNS.',
+      code: error.code || null,
+      errno: error.errno || null,
+      syscall: error.syscall || null,
+      hostname: 'smtp.gmail.com',
+      address: null,
+      port: null,
+      stack: error.stack || null
+    });
+  }
+});
+
+app.get('/api/diagnostics/port465', async (req, res) => {
+  console.log('[NET] Conectando porta 465');
+  const startedAt = Date.now();
+  const result = await testTcpConnection('smtp.gmail.com', 465, 20000);
+  const connectedInMs = Date.now() - startedAt;
+
+  if (result.ok) {
+    console.log('[NET] Conectado', { host: 'smtp.gmail.com', port: 465, connectedInMs });
+    return res.json({ ok: true, host: 'smtp.gmail.com', port: 465, connectedInMs });
+  }
+
+  console.error('[NET] Timeout', {
+    message: result.error || 'Connection timeout',
+    code: result.code || 'ETIMEDOUT',
+    errno: result.errno || null,
+    syscall: result.syscall || null,
+    hostname: 'smtp.gmail.com',
+    address: result.address || null,
+    port: 465,
+    stack: result.stack || null
+  });
+
+  return res.status(500).json({
+    ok: false,
+    host: 'smtp.gmail.com',
+    port: 465,
+    code: result.code || 'ETIMEDOUT',
+    message: result.error || 'Connection timeout',
+    errno: result.errno || null,
+    syscall: result.syscall || null,
+    hostname: 'smtp.gmail.com',
+    address: result.address || null,
+    port: 465,
+    stack: result.stack || null,
+    connectedInMs
+  });
+});
+
+app.get('/api/diagnostics/port587', async (req, res) => {
+  console.log('[NET] Conectando porta 587');
+  const startedAt = Date.now();
+  const result = await testTcpConnection('smtp.gmail.com', 587, 20000);
+  const connectedInMs = Date.now() - startedAt;
+
+  if (result.ok) {
+    console.log('[NET] Conectado', { host: 'smtp.gmail.com', port: 587, connectedInMs });
+    return res.json({ ok: true, host: 'smtp.gmail.com', port: 587, connectedInMs });
+  }
+
+  console.error('[NET] Timeout', {
+    message: result.error || 'Connection timeout',
+    code: result.code || 'ETIMEDOUT',
+    errno: result.errno || null,
+    syscall: result.syscall || null,
+    hostname: 'smtp.gmail.com',
+    address: result.address || null,
+    port: 587,
+    stack: result.stack || null
+  });
+
+  return res.status(500).json({
+    ok: false,
+    host: 'smtp.gmail.com',
+    port: 587,
+    code: result.code || 'ETIMEDOUT',
+    message: result.error || 'Connection timeout',
+    errno: result.errno || null,
+    syscall: result.syscall || null,
+    hostname: 'smtp.gmail.com',
+    address: result.address || null,
+    port: 587,
+    stack: result.stack || null,
+    connectedInMs
+  });
+});
+
+app.get('/api/diagnostics/tls', async (req, res) => {
+  console.log('[TLS] Iniciando handshake');
+  const result = await testTlsHandshake('smtp.gmail.com', 465, 20000);
+
+  if (result.ok) {
+    console.log('[TLS] Handshake concluído', result);
+    return res.json({
+      ok: true,
+      authorized: Boolean(result.authorized),
+      protocol: result.protocol || null,
+      cipher: result.cipher || null,
+      servername: result.hostname || 'smtp.gmail.com',
+      peerCertificate: result.peerCertificate || null,
+      authorizationError: result.authorizationError || null
+    });
+  }
+
+  console.error('[TLS] Erro', {
+    message: result.error || 'TLS handshake failed',
+    code: result.code || null,
+    errno: result.errno || null,
+    syscall: result.syscall || null,
+    hostname: 'smtp.gmail.com',
+    address: null,
+    port: 465,
+    stack: result.stack || null
+  });
+
+  return res.status(500).json({
+    ok: false,
+    message: result.error || 'TLS handshake failed',
+    code: result.code || null,
+    errno: result.errno || null,
+    syscall: result.syscall || null,
+    hostname: 'smtp.gmail.com',
+    address: null,
+    port: 465,
+    stack: result.stack || null,
+    protocol: result.protocol || null,
+    cipher: result.cipher || null,
+    servername: result.hostname || 'smtp.gmail.com'
+  });
+});
+
+app.get('/api/diagnostics/smtp465', async (req, res) => {
+  const startedAt = Date.now();
+  console.log('[SMTP] Iniciando verify 465');
+
+  const result = await testSmtpVerify({
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    requireTLS: false,
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+    label: 'GMAIL_465'
+  });
+
+  const elapsedMs = Date.now() - startedAt;
+  console.log('[SMTP] Fim verify 465', { elapsedMs, ok: result.ok, code: result.code || null });
+
+  if (result.ok) {
+    return res.json({ ok: true, elapsedMs, host: 'smtp.gmail.com', port: 465, secure: true });
+  }
+
+  return res.status(500).json({
+    ok: false,
+    code: result.code || 'SMTP_VERIFY_FAILED',
+    message: result.message || 'SMTP verify failed',
+    errno: result.errno || null,
+    syscall: result.syscall || null,
+    hostname: 'smtp.gmail.com',
+    address: null,
+    port: 465,
+    stack: result.stack || null,
+    elapsedMs
+  });
+});
+
+app.get('/api/diagnostics/smtp587', async (req, res) => {
+  const startedAt = Date.now();
+  console.log('[SMTP] Iniciando verify 587');
+
+  const result = await testSmtpVerify({
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    requireTLS: true,
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+    label: 'GMAIL_587'
+  });
+
+  const elapsedMs = Date.now() - startedAt;
+  console.log('[SMTP] Fim verify 587', { elapsedMs, ok: result.ok, code: result.code || null });
+
+  if (result.ok) {
+    return res.json({ ok: true, elapsedMs, host: 'smtp.gmail.com', port: 587, secure: false, requireTLS: true });
+  }
+
+  return res.status(500).json({
+    ok: false,
+    code: result.code || 'SMTP_VERIFY_FAILED',
+    message: result.message || 'SMTP verify failed',
+    errno: result.errno || null,
+    syscall: result.syscall || null,
+    hostname: 'smtp.gmail.com',
+    address: null,
+    port: 587,
+    stack: result.stack || null,
+    elapsedMs
+  });
+});
+
+app.get('/api/diagnostics/report', async (req, res) => {
+  const dnsResult = await testDnsResolution('smtp.gmail.com');
+  const port465 = await testTcpConnection('smtp.gmail.com', 465, 20000);
+  const port587 = await testTcpConnection('smtp.gmail.com', 587, 20000);
+  const tlsResult = await testTlsHandshake('smtp.gmail.com', 465, 20000);
+  const smtp465 = await testSmtpVerify({
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    requireTLS: false,
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+    label: 'REPORT_465'
+  });
+  const smtp587 = await testSmtpVerify({
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    requireTLS: true,
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+    label: 'REPORT_587'
+  });
+
+  const report = {
+    dns: { status: dnsResult.ok ? 'OK' : 'FAIL', details: dnsResult },
+    port465: { status: port465.ok ? 'OK' : 'FAIL', details: port465 },
+    port587: { status: port587.ok ? 'OK' : 'FAIL', details: port587 },
+    tls: { status: tlsResult.ok ? 'OK' : 'FAIL', details: tlsResult },
+    smtp465: { status: smtp465.ok ? 'OK' : 'FAIL', details: smtp465 },
+    smtp587: { status: smtp587.ok ? 'OK' : 'FAIL', details: smtp587 },
+    diagnosis: dnsResult.ok
+      ? 'DNS resolve corretamente. O problema provável é que o Render não consegue estabelecer conexão TCP/TLS com smtp.gmail.com, impedindo que o Nodemailer chegue na autenticação do Gmail.'
+      : 'DNS falhou ao resolver smtp.gmail.com, então a falha ocorre antes da conexão TCP.'
+  };
+
+  console.log('[DIAG] Relatório consolidado', report);
+  return res.json(report);
+});
+
 app.post('/api/update-access/login', (req, res) => {
   try {
     const { email, password } = req.body || {};
