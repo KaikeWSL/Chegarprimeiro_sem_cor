@@ -133,7 +133,7 @@ async function sendEmail({ to, subject, text, html }) {
 async function notifyNewAccessRequest(request) {
   const testMode = String(process.env.ACCESS_REQUEST_EMAIL_TEST || '').trim().toLowerCase() === 'true';
   const testApprover = 'kaike.santos.terceiros@claro.com.br';
-  const testRequester = 'kaike.santos@claro.com.br';
+  const testRequester = 'kaike.santos.terceiros@claro.com.br';
   const requesterEmail = String(request?.email || '').trim().toLowerCase();
 
   const approvers = testMode && requesterEmail === testRequester
