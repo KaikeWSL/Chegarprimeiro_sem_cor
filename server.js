@@ -130,6 +130,25 @@ async function sendEmail({ to, subject, text, html }) {
   }
 }
 
+function getApprovalRecipients() {
+  const explicitRecipients = (process.env.APPROVAL_EMAILS || process.env.GMAIL_APPROVERS || '')
+    .split(',')
+    .map((email) => String(email).trim())
+    .filter(Boolean);
+
+  if (explicitRecipients.length) {
+    return explicitRecipients;
+  }
+
+  const config = getAccessControlConfig();
+  const configuredApprovers = (config?.users || [])
+    .filter((user) => Boolean(user?.authorized) && Boolean(user?.canApprove))
+    .map((user) => String(user?.email || '').trim())
+    .filter(Boolean);
+
+  return configuredApprovers.length ? configuredApprovers : ['admin@empresa.com'];
+}
+
 async function notifyNewAccessRequest(request) {
   const testMode = String(process.env.ACCESS_REQUEST_EMAIL_TEST || '').trim().toLowerCase() === 'true';
   const testApprover = 'kaike.santos.terceiros@claro.com.br';
@@ -138,13 +157,10 @@ async function notifyNewAccessRequest(request) {
 
   const approvers = testMode && requesterEmail === testRequester
     ? [testApprover]
-    : (process.env.APPROVAL_EMAILS || process.env.GMAIL_APPROVERS || 'admin@empresa.com')
-        .split(',')
-        .map((email) => String(email).trim())
-        .filter(Boolean);
+    : getApprovalRecipients();
 
   if (!approvers.length) {
-    console.warn('[AccessControl][Email] falha ao notificar aprovação: lista APPROVAL_EMAILS vazia.', { raw: process.env.APPROVAL_EMAILS || process.env.GMAIL_APPROVERS || 'admin@empresa.com' });
+    console.warn('[AccessControl][Email] falha ao notificar aprovação: lista de aprovadores vazia.', { raw: process.env.APPROVAL_EMAILS || process.env.GMAIL_APPROVERS || '', fallback: 'admin@empresa.com' });
     return { ok: false, skipped: true, reason: 'empty_approvers' };
   }
 
