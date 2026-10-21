@@ -2,9 +2,9 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const nodemailer = require('nodemailer');
 const XLSX = require('xlsx');
 const { Octokit } = require('@octokit/rest');
+const { Resend } = require('resend');
 require('dotenv').config();
 
 const app = express();
@@ -97,88 +97,147 @@ function getAccessApproverEmails() {
   return [...new Set(recipients)];
 }
 
-function createMailTransporter() {
-  const host = process.env.SMTP_HOST || 'smtp.office365.com';
-  const port = Number(process.env.SMTP_PORT || 587);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER;
-
-  console.log('[Mail] Validando configuração SMTP', {
-    host,
-    port,
-    hasUser: Boolean(user),
-    hasPass: Boolean(pass),
-    hasFrom: Boolean(fromAddress),
-    smtpUser: user || 'não informado',
-    smtpFrom: fromAddress || 'não informado'
-  });
-
-  if (!user || !pass) {
-    console.warn('[Mail] SMTP não configurado. Faltando SMTP_USER ou SMTP_PASS.');
-    console.warn('[Mail] Variáveis esperadas: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM.');
-    return null;
-  }
-
-  return nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: { user, pass },
-    tls: {
-      ciphers: 'SSLv3',
-      rejectUnauthorized: false
-    }
-  });
+function getDashboardBaseUrl() {
+  return String(process.env.DASHBOARD_URL || process.env.NETLIFY_URL || 'https://dashboardinventariogpon.netlify.app').replace(/\/$/, '');
 }
 
-async function sendAccessNotificationEmail({ to, subject, text, html }) {
-  const transporter = createMailTransporter();
-  if (!transporter) {
-    console.warn('[Mail] Bloqueando envio: transporte SMTP indisponível.');
-    return { ok: false, reason: 'SMTP não configurado' };
-  }
+function getBackendBaseUrl() {
+  return String(process.env.BACKEND_URL || process.env.RENDER_EXTERNAL_URL || process.env.APP_URL || getDashboardBaseUrl()).replace(/\/$/, '');
+}
 
+function getAccessActionToken() {
+  return process.env.EMAIL_ACTION_SECRET || '';
+}
+
+function buildAccessActionUrls(request) {
+  const token = getAccessActionToken();
+  const backendBaseUrl = getBackendBaseUrl();
+  const approveUrl = `${backendBaseUrl}/api/update-access/email/approve?requestId=${encodeURIComponent(request.id)}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
+  const rejectUrl = `${backendBaseUrl}/api/update-access/email/reject?requestId=${encodeURIComponent(request.id)}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
+  const dashboardUrl = getDashboardBaseUrl();
+
+  return { approveUrl, rejectUrl, dashboardUrl };
+}
+
+async function sendEmail({ to, subject, html, text }) {
   const recipientList = Array.isArray(to) ? to.filter(Boolean) : [to].filter(Boolean);
   if (!recipientList.length) {
-    console.warn('[Mail] Bloqueando envio: nenhum destinatário encontrado.', { to, subject });
-    return { ok: false, reason: 'nenhum destinatário encontrado' };
+    console.warn('[Mail] Erro', { reason: 'nenhum destinatário encontrado', to, subject });
+    return { ok: false, provider: null, error: 'nenhum destinatário encontrado' };
   }
 
+  const normalizedSubject = String(subject || 'Mensagem do dashboard');
+  const normalizedText = String(text || '').trim() || 'Mensagem do dashboard';
+  const normalizedHtml = html || `<p>${normalizedText.replace(/\n/g, '<br />')}</p>`;
+
+  console.log('[Mail] Iniciando envio', {
+    provider: 'resend',
+    to: recipientList,
+    subject: normalizedSubject,
+    hasHtml: Boolean(html)
+  });
+
+  console.log('[Mail] Destinatários', { to: recipientList });
+
+  const apiKey = process.env.RESEND_API_KEY;
+  const sendGridKey = process.env.SENDGRID_API_KEY;
+
   try {
-    const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER;
-    console.log('[Mail] Tentando enviar e-mail', {
-      from: fromAddress,
+    if (apiKey) {
+      const resend = new Resend(apiKey);
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Timeout ao enviar e-mail com Resend.')), 30000);
+      });
+
+      const result = await Promise.race([
+        resend.emails.send({
+          from: process.env.RESEND_FROM || 'onboarding@resend.dev',
+          to: recipientList,
+          subject: normalizedSubject,
+          html: normalizedHtml,
+          text: normalizedText
+        }),
+        timeoutPromise
+      ]);
+
+      console.log('[Mail] Resultado', {
+        provider: 'resend',
+        ok: true,
+        id: result?.id || null,
+        status: result?.status || null
+      });
+
+      return {
+        ok: true,
+        provider: 'resend',
+        id: result?.id || null,
+        result
+      };
+    }
+
+    if (sendGridKey) {
+      const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${sendGridKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          personalizations: [{ to: recipientList.map((email) => ({ email })) }],
+          from: { email: process.env.SENDGRID_FROM || 'no-reply@example.com' },
+          subject: normalizedSubject,
+          content: [
+            { type: 'text/plain', value: normalizedText },
+            { type: 'text/html', value: normalizedHtml }
+          ]
+        }),
+        signal: AbortSignal.timeout(30000)
+      });
+
+      if (!response.ok) {
+        const payload = await response.text();
+        console.error('[Mail] Erro', {
+          provider: 'sendgrid',
+          status: response.status,
+          body: payload
+        });
+        return { ok: false, provider: 'sendgrid', error: payload || 'Erro ao enviar com SendGrid' };
+      }
+
+      console.log('[Mail] Resultado', {
+        provider: 'sendgrid',
+        ok: true,
+        status: response.status
+      });
+
+      return { ok: true, provider: 'sendgrid', result: { status: response.status } };
+    }
+
+    console.warn('[Mail] Erro', {
+      reason: 'RESEND_API_KEY ou SENDGRID_API_KEY não configuradas',
       to: recipientList,
-      subject,
-      textLength: String(text || '').length
+      subject: normalizedSubject
     });
 
-    const result = await transporter.sendMail({
-      from: fromAddress,
-      to: recipientList.join(', '),
-      subject,
-      text,
-      html
-    });
-
-    console.log('[Mail] E-mail enviado com sucesso', {
-      messageId: result?.messageId,
-      accepted: result?.accepted || recipientList,
-      rejected: result?.rejected || [],
-      subject
-    });
-    return { ok: true, result };
+    return {
+      ok: false,
+      provider: null,
+      error: 'RESEND_API_KEY ou SENDGRID_API_KEY não configuradas.'
+    };
   } catch (error) {
-    console.error('[Mail] Falha ao enviar e-mail', {
-      subject,
+    console.error('[Mail] Erro', {
+      provider: 'resend',
+      message: error?.message || String(error),
+      stack: error?.stack || null,
       to: recipientList,
-      errorMessage: error?.message || String(error),
-      code: error?.code || null,
-      response: error?.response || null,
-      stack: error?.stack || null
+      subject: normalizedSubject
     });
-    return { ok: false, reason: error?.message || 'falha no envio' };
+
+    return {
+      ok: false,
+      provider: 'resend',
+      error: error?.message || 'Erro desconhecido ao enviar e-mail.'
+    };
   }
 }
 
@@ -195,33 +254,42 @@ async function notifyApproversAboutAccessRequest(request) {
     return { ok: false, reason: 'sem aprovadores' };
   }
 
+  const actionLinks = buildAccessActionUrls(request);
   const subject = 'Nova solicitação de acesso ao dashboard';
   const text = [
     'Uma nova solicitação de acesso foi registrada.',
     `Nome: ${request.name}`,
     `E-mail: ${request.email}`,
     `Data: ${new Date(request.requestedAt || Date.now()).toLocaleString('pt-BR')}`,
-    'Acesse o painel para aprovar ou rejeitar a solicitação.'
+    `Dashboard: ${actionLinks.dashboardUrl}`,
+    `Aprovar: ${actionLinks.approveUrl}`,
+    `Recusar: ${actionLinks.rejectUrl}`
   ].join('\n');
 
-  const result = await sendAccessNotificationEmail({
+  const result = await sendEmail({
     to: recipients,
     subject,
     text,
     html: `
-      <div style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.6;">
+      <div style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.6; max-width: 700px; margin: 0 auto;">
         <h3 style="margin-bottom: 12px;">Nova solicitação de acesso</h3>
         <p><strong>Nome:</strong> ${request.name}</p>
         <p><strong>E-mail:</strong> ${request.email}</p>
         <p><strong>Data:</strong> ${new Date(request.requestedAt || Date.now()).toLocaleString('pt-BR')}</p>
+        <p><strong>Dashboard:</strong> <a href="${actionLinks.dashboardUrl}">${actionLinks.dashboardUrl}</a></p>
         <p>Uma nova solicitação foi registrada e aguarda aprovação.</p>
+        <div style="margin-top: 18px; display: flex; gap: 12px; flex-wrap: wrap;">
+          <a href="${actionLinks.approveUrl}" style="display: inline-block; padding: 10px 16px; background: #0f766e; color: white; text-decoration: none; border-radius: 8px; font-weight: 600;">Aprovar</a>
+          <a href="${actionLinks.rejectUrl}" style="display: inline-block; padding: 10px 16px; background: #b91c1c; color: white; text-decoration: none; border-radius: 8px; font-weight: 600;">Recusar</a>
+        </div>
       </div>
     `
   });
 
-  console.log('[Mail] Resultado do alerta para aprovadores', {
+  console.log('[Mail] Resultado', {
     ok: result?.ok,
-    reason: result?.reason || 'nenhum problema',
+    provider: result?.provider || null,
+    reason: result?.error || 'nenhum problema',
     recipients
   });
 
@@ -250,7 +318,7 @@ async function notifyRequesterAboutAccessDecision({ name, email, status, approve
     subject
   });
 
-  const result = await sendAccessNotificationEmail({
+  const result = await sendEmail({
     to: email,
     subject,
     text,
@@ -265,9 +333,10 @@ async function notifyRequesterAboutAccessDecision({ name, email, status, approve
     `
   });
 
-  console.log('[Mail] Resultado da resposta ao solicitante', {
+  console.log('[Mail] Resultado', {
     ok: result?.ok,
-    reason: result?.reason || 'nenhum problema',
+    provider: result?.provider || null,
+    reason: result?.error || 'nenhum problema',
     email
   });
 
@@ -1148,6 +1217,143 @@ app.post('/api/update-access/reject', async (req, res) => {
   } catch (error) {
     console.error('[AccessControl] erro ao recusar solicitação', error);
     res.status(500).json({ error: error.message || 'Erro ao recusar solicitação.' });
+  }
+});
+
+app.get('/api/update-access/email/approve', async (req, res) => {
+  try {
+    const requestId = String(req.query.requestId || '').trim();
+    const incomingToken = String(req.query.token || '').trim();
+    const expectedToken = getAccessActionToken();
+
+    if (expectedToken && incomingToken !== expectedToken) {
+      return res.status(403).json({ ok: false, error: 'Token de ação inválido.' });
+    }
+
+    if (!requestId) {
+      return res.status(400).json({ ok: false, error: 'requestId é obrigatório.' });
+    }
+
+    const pendingRequests = await getPendingAccessRequests();
+    const foundRequest = pendingRequests.find((request) => request.id === requestId);
+    if (!foundRequest) {
+      return res.status(404).json({ ok: false, error: 'Solicitação não encontrada.' });
+    }
+
+    const approverEmail = process.env.EMAIL_ACTION_APPROVER_EMAIL || getAccessApproverEmails()[0] || 'system@dashboard.local';
+    const actor = getAccessControlState(approverEmail, process.env.EMAIL_ACTION_APPROVER_PASSWORD || '');
+
+    if (!actor.isAuthorized || !actor.canApprove) {
+      return res.status(403).json({ ok: false, error: 'Nenhum aprovador autorizado para esta ação.' });
+    }
+
+    foundRequest.status = 'approved';
+    foundRequest.updatedAt = new Date().toISOString();
+    foundRequest.resolvedBy = approverEmail;
+
+    const config = getAccessControlConfig();
+    const nextUsers = Array.isArray(config.users) ? [...config.users] : [];
+    const index = nextUsers.findIndex((user) => normalizeAccessKey(user.email) === normalizeAccessKey(foundRequest.email));
+    const createdUser = {
+      name: foundRequest.name,
+      email: foundRequest.email,
+      password: foundRequest.password,
+      authorized: true,
+      canApprove: false,
+      notes: 'Acesso liberado pela aprovação por e-mail.'
+    };
+
+    if (index >= 0) {
+      nextUsers[index] = { ...nextUsers[index], ...createdUser };
+    } else {
+      nextUsers.push(createdUser);
+    }
+
+    await savePendingAccessRequests(pendingRequests);
+    await saveAccessControlConfig({ ...config, enabled: true, users: nextUsers });
+    await notifyRequesterAboutAccessDecision({
+      name: foundRequest.name,
+      email: foundRequest.email,
+      status: 'approved',
+      approver: approverEmail
+    });
+
+    return res.json({ ok: true, approved: true, request: foundRequest });
+  } catch (error) {
+    console.error('[Mail] Erro na ação de aprovação por e-mail', error);
+    return res.status(500).json({ ok: false, error: error.message || 'Erro ao aprovar via e-mail.' });
+  }
+});
+
+app.get('/api/update-access/email/reject', async (req, res) => {
+  try {
+    const requestId = String(req.query.requestId || '').trim();
+    const incomingToken = String(req.query.token || '').trim();
+    const expectedToken = getAccessActionToken();
+
+    if (expectedToken && incomingToken !== expectedToken) {
+      return res.status(403).json({ ok: false, error: 'Token de ação inválido.' });
+    }
+
+    if (!requestId) {
+      return res.status(400).json({ ok: false, error: 'requestId é obrigatório.' });
+    }
+
+    const pendingRequests = await getPendingAccessRequests();
+    const foundRequest = pendingRequests.find((request) => request.id === requestId);
+    if (!foundRequest) {
+      return res.status(404).json({ ok: false, error: 'Solicitação não encontrada.' });
+    }
+
+    const approverEmail = process.env.EMAIL_ACTION_APPROVER_EMAIL || getAccessApproverEmails()[0] || 'system@dashboard.local';
+    const actor = getAccessControlState(approverEmail, process.env.EMAIL_ACTION_APPROVER_PASSWORD || '');
+
+    if (!actor.isAuthorized || !actor.canApprove) {
+      return res.status(403).json({ ok: false, error: 'Nenhum aprovador autorizado para esta ação.' });
+    }
+
+    foundRequest.status = 'rejected';
+    foundRequest.updatedAt = new Date().toISOString();
+    foundRequest.resolvedBy = approverEmail;
+
+    await savePendingAccessRequests(pendingRequests);
+    await notifyRequesterAboutAccessDecision({
+      name: foundRequest.name,
+      email: foundRequest.email,
+      status: 'rejected',
+      approver: approverEmail
+    });
+
+    return res.json({ ok: true, rejected: true, request: foundRequest });
+  } catch (error) {
+    console.error('[Mail] Erro na ação de rejeição por e-mail', error);
+    return res.status(500).json({ ok: false, error: error.message || 'Erro ao rejeitar via e-mail.' });
+  }
+});
+
+app.get('/api/test-email', async (req, res) => {
+  try {
+    const recipient = String(req.query.to || process.env.TEST_EMAIL_RECIPIENT || process.env.EMAIL_ACTION_APPROVER_EMAIL || '').trim();
+
+    if (!recipient) {
+      return res.status(400).json({ ok: false, error: 'Informe o destinatário via query ?to= ou defina TEST_EMAIL_RECIPIENT no Render.' });
+    }
+
+    const result = await sendEmail({
+      to: recipient,
+      subject: 'Teste de envio do dashboard',
+      text: 'Teste de e-mail via API do Resend/SendGrid.',
+      html: '<p>Teste de e-mail via API do Resend/SendGrid.</p>'
+    });
+
+    if (!result.ok) {
+      return res.status(500).json({ ok: false, error: result.error || 'Erro ao enviar e-mail de teste' });
+    }
+
+    return res.json({ ok: true, provider: result.provider || 'unknown', id: result.id || null });
+  } catch (error) {
+    console.error('[Mail] Erro no teste de e-mail', error);
+    return res.status(500).json({ ok: false, error: error.message || 'Erro interno ao testar e-mail.' });
   }
 });
 
