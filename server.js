@@ -853,7 +853,7 @@ app.get('/api/update-access/requests', async (req, res) => {
 
 app.post('/api/update-access/approve', async (req, res) => {
   try {
-    const { requestId, approved = true, actorEmail, actorPassword } = req.body || {};
+    const { requestId, approved = true, actorEmail, actorPassword, canApprove = false } = req.body || {};
     const actor = getAccessControlState(actorEmail || req.headers['x-user-email'] || '', actorPassword || req.headers['x-user-password'] || '');
 
     if (!actor.isAuthorized || !actor.canApprove) {
@@ -869,19 +869,22 @@ app.post('/api/update-access/approve', async (req, res) => {
     const config = getAccessControlConfig();
     const nextUsers = Array.isArray(config.users) ? [...config.users] : [];
     const index = nextUsers.findIndex((user) => normalizeAccessKey(user.email) === normalizeAccessKey(foundRequest.email));
+    const grantCanApprove = Boolean(approved && canApprove);
 
     if (approved) {
+      const createdUser = {
+        name: foundRequest.name,
+        email: foundRequest.email,
+        password: foundRequest.password,
+        authorized: true,
+        canApprove: grantCanApprove,
+        notes: 'Acesso liberado pela aprovação de um usuário autorizado.'
+      };
+
       if (index >= 0) {
-        nextUsers[index] = { ...nextUsers[index], name: foundRequest.name, email: foundRequest.email, password: foundRequest.password, authorized: true, canApprove: false };
+        nextUsers[index] = { ...nextUsers[index], ...createdUser };
       } else {
-        nextUsers.push({
-          name: foundRequest.name,
-          email: foundRequest.email,
-          password: foundRequest.password,
-          authorized: true,
-          canApprove: false,
-          notes: 'Acesso liberado pela aprovação de um usuário autorizado.'
-        });
+        nextUsers.push(createdUser);
       }
     }
 
