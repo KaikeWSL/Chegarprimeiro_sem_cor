@@ -25,6 +25,8 @@
     "email": "kaike.wesley12d@claro.com.br",
     "password": "123",
     "requestedAt": "2026-10-21T10:45:02.075Z",
-    "status": "pending"
+    "status": "approved",
+    "updatedAt": "2026-10-21T10:46:13.340Z",
+    "resolvedBy": "kaike.santos.terceiros@claro.com.br"
   }
 ]
