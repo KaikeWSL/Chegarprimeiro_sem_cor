@@ -28,5 +28,13 @@
     "status": "approved",
     "updatedAt": "2026-10-21T10:46:13.340Z",
     "resolvedBy": "kaike.santos.terceiros@claro.com.br"
+  },
+  {
+    "id": "req-1792580021024",
+    "name": "dwad6",
+    "email": "kaike.wesleyp12@claro.com.br",
+    "password": "1",
+    "requestedAt": "2026-10-21T10:53:41.024Z",
+    "status": "pending"
   }
 ]
