@@ -126,5 +126,13 @@
     "password": "123",
     "requestedAt": "2026-10-21T13:10:31.084Z",
     "status": "pending"
+  },
+  {
+    "id": "req-1792589523200",
+    "name": "teste30",
+    "email": "kaike.santos.terceiross@claro.com.br",
+    "password": "123",
+    "requestedAt": "2026-10-21T13:32:03.200Z",
+    "status": "pending"
   }
 ]
