@@ -2,11 +2,8 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const dns = require('dns');
-const net = require('net');
-const tls = require('tls');
-const nodemailer = require('nodemailer');
 const XLSX = require('xlsx');
+const nodemailer = require('nodemailer');
 const { Octokit } = require('@octokit/rest');
 require('dotenv').config();
 
@@ -67,6 +64,91 @@ function readJsonFile(filePath, fallbackValue) {
   }
 }
 
+async function sendEmail({ to, subject, text, html }) {
+  const gmailUser = process.env.GMAIL_USER;
+  const gmailPassword = process.env.GMAIL_APP_PASSWORD;
+
+  if (!gmailUser || !gmailPassword) {
+    console.warn('[AccessControl] Gmail não configurado. Variáveis GMAIL_USER e GMAIL_APP_PASSWORD ausentes.');
+    return { ok: false, skipped: true };
+  }
+
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: gmailUser,
+      pass: gmailPassword
+    }
+  });
+
+  const recipients = Array.isArray(to) ? to : String(to || '').split(',').map((item) => item.trim()).filter(Boolean);
+  if (!recipients.length) {
+    return { ok: false, skipped: true };
+  }
+
+  const info = await transporter.sendMail({
+    from: `"Dashboard SGD" <${gmailUser}>`,
+    to: recipients,
+    subject,
+    text,
+    html: html || `<p>${String(text || '').replace(/\n/g, '<br />')}</p>`
+  });
+
+  console.log('[AccessControl] e-mail enviado com sucesso', { messageId: info.messageId, to: recipients });
+  return { ok: true, messageId: info.messageId };
+}
+
+async function notifyNewAccessRequest(request) {
+  const approvers = (process.env.APPROVAL_EMAILS || process.env.GMAIL_APPROVERS || 'admin@empresa.com')
+    .split(',')
+    .map((email) => String(email).trim())
+    .filter(Boolean);
+
+  if (!approvers.length) {
+    return { ok: false, skipped: true };
+  }
+
+  const subject = 'Nova solicitação de acesso ao dashboard';
+  const text = [
+    'Nova solicitação de acesso recebida.',
+    `Nome: ${request?.name || 'Não informado'}`,
+    `E-mail: ${request?.email || 'Não informado'}`,
+    `Data: ${new Date(request?.requestedAt || Date.now()).toLocaleString('pt-BR')}`,
+    'Acesse o painel de aprovações para autorizar ou recusar.'
+  ].join('\n');
+
+  return sendEmail({
+    to: approvers,
+    subject,
+    text,
+    html: `<h3>Nova solicitação de acesso</h3><p><strong>Nome:</strong> ${request?.name || 'Não informado'}</p><p><strong>E-mail:</strong> ${request?.email || 'Não informado'}</p><p><strong>Data:</strong> ${new Date(request?.requestedAt || Date.now()).toLocaleString('pt-BR')}</p><p>Acesse o painel de aprovações para autorizar ou recusar.</p>`
+  });
+}
+
+async function notifyAccessDecision(request, decision, actorName = '') {
+  const email = request?.email;
+  if (!email) {
+    return { ok: false, skipped: true };
+  }
+
+  const approved = decision === 'approved';
+  const subject = approved ? 'Seu acesso foi aprovado' : 'Sua solicitação de acesso foi recusada';
+  const text = [
+    approved ? 'Seu acesso ao dashboard foi aprovado.' : 'Sua solicitação de acesso foi recusada.',
+    `Nome: ${request?.name || 'Não informado'}`,
+    `E-mail: ${request?.email || 'Não informado'}`,
+    `Responsável: ${actorName || 'Administrador'}`,
+    approved ? 'Você já pode realizar login e acessar o painel.' : 'Se quiser, pode solicitar acesso novamente com outro contato ou entrar em contato com a equipe.'
+  ].join('\n');
+
+  return sendEmail({
+    to: email,
+    subject,
+    text,
+    html: `<h3>${approved ? 'Acesso aprovado' : 'Solicitação recusada'}</h3><p>${approved ? 'Seu acesso ao dashboard foi aprovado.' : 'Sua solicitação de acesso foi recusada.'}</p><p><strong>Nome:</strong> ${request?.name || 'Não informado'}</p><p><strong>E-mail:</strong> ${request?.email || 'Não informado'}</p><p><strong>Responsável:</strong> ${actorName || 'Administrador'}</p>`
+  });
+}
+
 function getAccessControlConfig() {
   const envUsers = process.env.UPDATE_ACCESS_USERS || process.env.ACCESS_CONTROL_USERS || '';
   const fallback = readJsonFile(accessControlFile, DEFAULT_ACCESS_CONTROL);
@@ -84,640 +166,6 @@ function getAccessControlConfig() {
   } catch (error) {
     return fallback;
   }
-}
-
-function getAccessApproverEmails() {
-  const config = getAccessControlConfig();
-  const envApprovers = String(process.env.ACCESS_APPROVER_EMAILS || '').split(',');
-  const configApprovers = (config?.users || [])
-    .filter((user) => Boolean(user?.email) && user?.authorized && user?.canApprove)
-    .map((user) => String(user.email).trim());
-
-  const recipients = [...configApprovers, ...envApprovers]
-    .map((email) => String(email || '').trim())
-    .filter((email) => Boolean(email) && email.includes('@'));
-
-  return [...new Set(recipients)];
-}
-
-function classifySmtpFailure(error = {}) {
-  const code = String(error?.code || '').toUpperCase();
-  const command = String(error?.command || '').toUpperCase();
-  const message = String(error?.message || '');
-
-  if (code === 'ENOTFOUND' || /ENOTFOUND|EAI_AGAIN|getaddrinfo|DNS/i.test(message)) {
-    return 'DNS';
-  }
-
-  if (code === 'ETIMEDOUT' || /Connection timeout|timed out|timeout/i.test(message)) {
-    return 'TCP';
-  }
-
-  if (/CERT|SELF_SIGNED|TLS|SSL|HANDSHAKE|DEPTH_ZERO|UNABLE_TO_VERIFY|certificate/i.test(message)) {
-    return 'TLS';
-  }
-
-  if (code === 'EAUTH' || /AUTH|535|Username and Password not accepted|authentication failed|invalid credentials/i.test(message) || /AUTH/i.test(command)) {
-    return 'Autenticação';
-  }
-
-  if (command === 'DATA' || /sendmail|DATA|message not sent|mail from/i.test(message)) {
-    return 'SendMail';
-  }
-
-  return 'TCP';
-}
-
-async function resolveSmtpHost(host) {
-  try {
-    const result = await dns.promises.lookup(host, { all: false, verbatim: true });
-    console.log('[Mail][SMTP][DNS]', {
-      host,
-      resolvedIp: result?.address || null,
-      family: result?.family || null
-    });
-    return { ok: true, ip: result?.address || null, family: result?.family || null };
-  } catch (error) {
-    console.error('[Mail][SMTP][DNS][FAIL]', {
-      host,
-      code: error?.code || null,
-      message: error?.message || String(error),
-      stack: error?.stack || null
-    });
-    return { ok: false, stage: 'DNS', code: error?.code || 'DNS_FAIL', message: error?.message || String(error), stack: error?.stack || null };
-  }
-}
-
-function getSmtpTransportConfig({ host, port, secure, user, pass, requireTLS, label = 'default' }) {
-  const timeoutMs = 60000;
-
-  console.log(`[Mail][SMTP][${label}] config`, {
-    host,
-    port,
-    secure,
-    user,
-    requireTLS,
-    timeoutMs,
-    connectionTimeout: timeoutMs,
-    greetingTimeout: timeoutMs,
-    socketTimeout: timeoutMs
-  });
-
-  return {
-    host,
-    port,
-    secure,
-    requireTLS,
-    auth: user && pass ? { user, pass } : undefined,
-    connectionTimeout: timeoutMs,
-    greetingTimeout: timeoutMs,
-    socketTimeout: timeoutMs,
-    logger: true,
-    debug: true,
-    tls: {
-      ciphers: 'SSLv3',
-      rejectUnauthorized: false
-    }
-  };
-}
-
-function createMailTransporter() {
-  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const port = Number(process.env.SMTP_PORT || 587);
-  const secure = Boolean(process.env.SMTP_SECURE === 'true' || port === 465);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER;
-
-  console.log('[Mail] Validando configuração SMTP', {
-    host,
-    port,
-    secure,
-    hasUser: Boolean(user),
-    hasPass: Boolean(pass),
-    hasFrom: Boolean(fromAddress),
-    smtpUser: user || 'não informado',
-    smtpFrom: fromAddress || 'não informado',
-    timeout: 60000,
-    connectionTimeout: 60000,
-    greetingTimeout: 60000,
-    socketTimeout: 60000
-  });
-
-  if (!user || !pass) {
-    console.warn('[Mail] SMTP não configurado. Faltando SMTP_USER ou SMTP_PASS.');
-    console.warn('[Mail] Variáveis esperadas: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM.');
-    return null;
-  }
-
-  return nodemailer.createTransport(getSmtpTransportConfig({
-    host,
-    port,
-    secure,
-    user,
-    pass,
-    requireTLS: !secure,
-    label: 'DEFAULT'
-  }));
-}
-
-async function verifySmtpTransport({ host, port, secure, requireTLS, user, pass, label }) {
-  const stageStart = 'DNS';
-  console.log(`[Mail][SMTP][${label}][START]`, {
-    stage: stageStart,
-    host,
-    port,
-    secure,
-    requireTLS,
-    user,
-    timeout: 60000
-  });
-
-  const dnsResult = await resolveSmtpHost(host);
-  if (!dnsResult.ok) {
-    return {
-      ok: false,
-      code: dnsResult.code,
-      stage: 'DNS',
-      message: dnsResult.message,
-      stack: dnsResult.stack,
-      host,
-      port,
-      secure,
-      requireTLS,
-      resolvedIp: null
-    };
-  }
-
-  const transporter = nodemailer.createTransport(getSmtpTransportConfig({
-    host,
-    port,
-    secure,
-    user,
-    pass,
-    requireTLS,
-    label
-  }));
-
-  transporter.on('log', (info) => {
-    console.log(`[Mail][SMTP][${label}][LOG]`, info);
-  });
-
-  transporter.on('error', (error) => {
-    console.error(`[Mail][SMTP][${label}][ERROR]`, {
-      code: error?.code || null,
-      command: error?.command || null,
-      response: error?.response || null,
-      message: error?.message || String(error),
-      stack: error?.stack || null
-    });
-  });
-
-  try {
-    console.log(`[Mail][SMTP][${label}][TCP]`, {
-      host,
-      port,
-      secure,
-      requireTLS,
-      resolvedIp: dnsResult.ip,
-      stage: 'TCP'
-    });
-
-    await transporter.verify();
-    console.log(`[Mail][SMTP][${label}][VERIFY_OK]`, {
-      host,
-      port,
-      secure,
-      requireTLS,
-      resolvedIp: dnsResult.ip,
-      stage: 'Autenticação'
-    });
-
-    return { ok: true, code: null, message: 'SMTP ok', host, port, secure, requireTLS, stage: 'Autenticação', resolvedIp: dnsResult.ip };
-  } catch (error) {
-    const stage = classifySmtpFailure(error);
-    console.error(`[Mail][SMTP][${label}][FAIL]`, {
-      stage,
-      host,
-      port,
-      secure,
-      requireTLS,
-      resolvedIp: dnsResult.ip,
-      code: error?.code || null,
-      command: error?.command || null,
-      response: error?.response || null,
-      message: error?.message || String(error),
-      stack: error?.stack || null
-    });
-
-    return {
-      ok: false,
-      stage,
-      code: error?.code || 'SMTP_VERIFY_FAILED',
-      command: error?.command || null,
-      response: error?.response || null,
-      message: error?.message || String(error),
-      stack: error?.stack || null,
-      host,
-      port,
-      secure,
-      requireTLS,
-      resolvedIp: dnsResult.ip
-    };
-  }
-}
-
-async function testDnsResolution(hostname) {
-  const startedAt = Date.now();
-  console.log('[DNS] Resolvendo hostname', { hostname });
-
-  return new Promise((resolve) => {
-    dns.lookup(hostname, { all: true }, (error, addresses) => {
-      const resolutionMs = Date.now() - startedAt;
-
-      if (error) {
-        const payload = {
-          ok: false,
-          hostname,
-          addresses: [],
-          resolutionMs,
-          message: error.message,
-          code: error.code || null,
-          errno: error.errno || null,
-          syscall: error.syscall || null,
-          hostname: hostname,
-          address: null,
-          port: null,
-          stack: error.stack || null
-        };
-
-        console.error('[DNS] falha de resolução', payload);
-        resolve(payload);
-        return;
-      }
-
-      const record = Array.isArray(addresses) ? addresses : [addresses];
-      const payload = {
-        ok: true,
-        hostname,
-        addresses: record.map((item) => typeof item === 'string' ? item : item.address),
-        resolutionMs,
-        usedIp: record[0] && typeof record[0] === 'object' ? record[0].address : record[0] || null,
-        family: record[0] && typeof record[0] === 'object' ? record[0].family : null,
-        error: null,
-        code: null
-      };
-
-      console.log('[DNS] resolução ok', payload);
-      resolve(payload);
-    });
-  });
-}
-
-async function testTcpConnection(host, port, timeoutMs = 20000) {
-  const startedAt = Date.now();
-  console.log('[NET] iniciando TCP connect', { host, port, timeoutMs });
-
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    let settled = false;
-
-    const finish = (payload) => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      console.log('[NET] resultado TCP', payload);
-      resolve(payload);
-    };
-
-    socket.setTimeout(timeoutMs);
-
-    socket.once('connect', () => {
-      finish({
-        ok: true,
-        host,
-        port,
-        connectedInMs: Date.now() - startedAt,
-        timeoutMs,
-        error: null,
-        code: null
-      });
-    });
-
-    socket.once('timeout', () => {
-      finish({
-        ok: false,
-        host,
-        port,
-        connectedInMs: Date.now() - startedAt,
-        timeoutMs,
-        error: 'Connection timeout',
-        code: 'ETIMEDOUT',
-        errno: null,
-        syscall: 'connect',
-        hostname: host,
-        address: null,
-        stack: null
-      });
-    });
-
-    socket.once('error', (error) => {
-      finish({
-        ok: false,
-        host,
-        port,
-        connectedInMs: Date.now() - startedAt,
-        timeoutMs,
-        error: error.message || 'TCP connection failed',
-        code: error.code || null,
-        errno: error.errno || null,
-        syscall: error.syscall || null,
-        hostname: host,
-        address: null,
-        stack: error.stack || null
-      });
-    });
-
-    socket.connect(port, host);
-  });
-}
-
-async function testTlsHandshake(host, port, timeoutMs = 20000) {
-  const startedAt = Date.now();
-  console.log('[TLS] iniciando handshake', { host, port, timeoutMs });
-
-  return new Promise((resolve) => {
-    const socket = tls.connect({
-      host,
-      port,
-      servername: host,
-      rejectUnauthorized: false,
-      timeout: timeoutMs
-    }, () => {
-      const info = {
-        ok: true,
-        host,
-        port,
-        protocol: socket.getProtocol(),
-        cipher: socket.getCipher && socket.getCipher ? socket.getCipher() : null,
-        peerCertificate: socket.getPeerCertificate ? socket.getPeerCertificate() : null,
-        hostname: socket.servername || host,
-        handshakeMs: Date.now() - startedAt,
-        authorized: socket.authorized || false,
-        authorizationError: socket.authorizationError ? socket.authorizationError.message : null
-      };
-
-      console.log('[TLS] handshake ok', info);
-      socket.destroy();
-      resolve(info);
-    });
-
-    socket.on('timeout', () => {
-      const payload = {
-        ok: false,
-        host,
-        port,
-        protocol: null,
-        cipher: null,
-        peerCertificate: null,
-        hostname: host,
-        error: 'TLS timeout',
-        code: 'ETIMEDOUT',
-        errno: null,
-        syscall: 'tls.connect',
-        stack: null,
-        handshakeMs: Date.now() - startedAt
-      };
-      console.error('[TLS] timeout', payload);
-      socket.destroy();
-      resolve(payload);
-    });
-
-    socket.on('error', (error) => {
-      const payload = {
-        ok: false,
-        host,
-        port,
-        protocol: null,
-        cipher: null,
-        peerCertificate: null,
-        hostname: host,
-        error: error.message || 'TLS handshake failed',
-        code: error.code || null,
-        errno: error.errno || null,
-        syscall: error.syscall || null,
-        stack: error.stack || null,
-        handshakeMs: Date.now() - startedAt
-      };
-      console.error('[TLS] falha', payload);
-      socket.destroy();
-      resolve(payload);
-    });
-  });
-}
-
-async function testSmtpVerify({ host, port, secure, requireTLS, user, pass, label }) {
-  const startedAt = Date.now();
-  console.log(`[SMTP] iniciando verify`, { label, host, port, secure, requireTLS, user: Boolean(user) });
-
-  const transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure,
-    requireTLS,
-    auth: user && pass ? { user, pass } : undefined,
-    connectionTimeout: 60000,
-    greetingTimeout: 60000,
-    socketTimeout: 60000,
-    logger: true,
-    debug: true,
-    tls: {
-      ciphers: 'SSLv3',
-      rejectUnauthorized: false
-    }
-  });
-
-  try {
-    const result = await transporter.verify();
-    const payload = {
-      ok: true,
-      host,
-      port,
-      secure,
-      requireTLS,
-      startedAt,
-      elapsedMs: Date.now() - startedAt,
-      result,
-      summary: 'SMTP verify ok'
-    };
-
-    console.log('[SMTP] verify ok', payload);
-    return payload;
-  } catch (error) {
-    const payload = {
-      ok: false,
-      host,
-      port,
-      secure,
-      requireTLS,
-      startedAt,
-      elapsedMs: Date.now() - startedAt,
-      message: error.message || 'SMTP verify failed',
-      code: error.code || null,
-      errno: error.errno || null,
-      syscall: error.syscall || null,
-      hostname: host,
-      address: null,
-      port,
-      stack: error.stack || null,
-      summary: 'SMTP verify falhou'
-    };
-
-    console.error('[SMTP] verify falhou', payload);
-    return payload;
-  }
-}
-
-async function sendAccessNotificationEmail({ to, subject, text, html }) {
-  const transporter = createMailTransporter();
-  if (!transporter) {
-    console.warn('[Mail] Bloqueando envio: transporte SMTP indisponível.');
-    return { ok: false, reason: 'SMTP não configurado' };
-  }
-
-  const recipientList = Array.isArray(to) ? to.filter(Boolean) : [to].filter(Boolean);
-  if (!recipientList.length) {
-    console.warn('[Mail] Bloqueando envio: nenhum destinatário encontrado.', { to, subject });
-    return { ok: false, reason: 'nenhum destinatário encontrado' };
-  }
-
-  try {
-    const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER;
-    console.log('[Mail] Tentando enviar e-mail', {
-      from: fromAddress,
-      to: recipientList,
-      subject,
-      textLength: String(text || '').length
-    });
-
-    const result = await transporter.sendMail({
-      from: fromAddress,
-      to: recipientList.join(', '),
-      subject,
-      text,
-      html
-    });
-
-    console.log('[Mail] E-mail enviado com sucesso', {
-      messageId: result?.messageId,
-      accepted: result?.accepted || recipientList,
-      rejected: result?.rejected || [],
-      subject
-    });
-    return { ok: true, result };
-  } catch (error) {
-    console.error('[Mail] Falha ao enviar e-mail', {
-      subject,
-      to: recipientList,
-      errorMessage: error?.message || String(error),
-      code: error?.code || null,
-      response: error?.response || null,
-      stack: error?.stack || null
-    });
-    return { ok: false, reason: error?.message || 'falha no envio' };
-  }
-}
-
-async function notifyApproversAboutAccessRequest(request) {
-  const recipients = getAccessApproverEmails();
-  console.log('[Mail] Preparando alerta para aprovadores', {
-    recipients,
-    requestEmail: request?.email,
-    requestName: request?.name
-  });
-
-  if (!recipients.length) {
-    console.warn('[Mail] Nenhum aprovador encontrado com canApprove: true e authorized: true.');
-    return { ok: false, reason: 'sem aprovadores' };
-  }
-
-  const subject = 'Nova solicitação de acesso ao dashboard';
-  const text = [
-    'Uma nova solicitação de acesso foi registrada.',
-    `Nome: ${request.name}`,
-    `E-mail: ${request.email}`,
-    `Data: ${new Date(request.requestedAt || Date.now()).toLocaleString('pt-BR')}`,
-    'Acesse o painel para aprovar ou rejeitar a solicitação.'
-  ].join('\n');
-
-  const result = await sendAccessNotificationEmail({
-    to: recipients,
-    subject,
-    text,
-    html: `
-      <div style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.6;">
-        <h3 style="margin-bottom: 12px;">Nova solicitação de acesso</h3>
-        <p><strong>Nome:</strong> ${request.name}</p>
-        <p><strong>E-mail:</strong> ${request.email}</p>
-        <p><strong>Data:</strong> ${new Date(request.requestedAt || Date.now()).toLocaleString('pt-BR')}</p>
-        <p>Uma nova solicitação foi registrada e aguarda aprovação.</p>
-      </div>
-    `
-  });
-
-  console.log('[Mail] Resultado do alerta para aprovadores', {
-    ok: result?.ok,
-    reason: result?.reason || 'nenhum problema',
-    recipients
-  });
-
-  return result;
-}
-
-async function notifyRequesterAboutAccessDecision({ name, email, status, approver }) {
-  const safeStatus = status === 'approved' ? 'aprovada' : 'rejeitada';
-  const subject = `Solicitação de acesso ${safeStatus}`;
-  const text = [
-    `Olá ${name},`,
-    '',
-    `Sua solicitação de acesso foi ${safeStatus}.`,
-    approver ? `Aprovador: ${approver}` : '',
-    '',
-    status === 'approved'
-      ? 'Seu acesso ao dashboard foi liberado.'
-      : 'Seu acesso foi negado. Se achar que isso foi um erro, entre em contato com o responsável.'
-  ].filter(Boolean).join('\n');
-
-  console.log('[Mail] Preparando resposta ao solicitante', {
-    name,
-    email,
-    status,
-    approver,
-    subject
-  });
-
-  const result = await sendAccessNotificationEmail({
-    to: email,
-    subject,
-    text,
-    html: `
-      <div style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.6;">
-        <h3 style="margin-bottom: 12px;">Solicitação de acesso ${safeStatus}</h3>
-        <p>Olá <strong>${name}</strong>,</p>
-        <p>Sua solicitação de acesso foi <strong>${safeStatus}</strong>.</p>
-        ${approver ? `<p><strong>Aprovador:</strong> ${approver}</p>` : ''}
-        <p>${status === 'approved' ? 'Seu acesso ao dashboard foi liberado.' : 'Seu acesso foi negado. Se achar que isso foi um erro, entre em contato com o responsável.'}</p>
-      </div>
-    `
-  });
-
-  console.log('[Mail] Resultado da resposta ao solicitante', {
-    ok: result?.ok,
-    reason: result?.reason || 'nenhum problema',
-    email
-  });
-
-  return result;
 }
 
 async function saveAccessControlConfig(config) {
@@ -1394,423 +842,6 @@ app.get('/api/update-access/status', (req, res) => {
   }
 });
 
-app.get('/api/test-network', async (req, res) => {
-  try {
-    const dnsResult = await testDnsResolution('smtp.gmail.com');
-    const summary = {
-      dnsWorking: dnsResult.ok,
-      credentialsLoaded: Boolean(process.env.SMTP_USER && process.env.SMTP_PASS),
-      nodemailerStarted: true,
-      likelyCause: dnsResult.ok ? 'Render não consegue estabelecer conexão TCP com o servidor SMTP do Gmail.' : 'DNS falhou ao resolver smtp.gmail.com.'
-    };
-
-    return res.json({
-      ok: dnsResult.ok,
-      hostname: 'smtp.gmail.com',
-      addresses: dnsResult.addresses || [],
-      resolutionMs: dnsResult.resolutionMs || 0,
-      usedIp: dnsResult.usedIp || null,
-      summary
-    });
-  } catch (error) {
-    console.error('[NET] falha em /api/test-network', error);
-    return res.status(500).json({
-      ok: false,
-      hostname: 'smtp.gmail.com',
-      message: error.message || 'Erro ao testar DNS.',
-      code: error.code || null,
-      errno: error.errno || null,
-      syscall: error.syscall || null,
-      stack: error.stack || null
-    });
-  }
-});
-
-app.get('/api/test-port-465', async (req, res) => {
-  const result = await testTcpConnection('smtp.gmail.com', 465, 20000);
-  const summary = {
-    dnsWorking: true,
-    tcp465Accessible: result.ok,
-    probableCause: result.ok ? null : 'Render não consegue estabelecer conexão TCP com smtp.gmail.com:465.'
-  };
-
-  return res.json({
-    ok: result.ok,
-    host: 'smtp.gmail.com',
-    port: 465,
-    connectedInMs: result.connectedInMs || 0,
-    error: result.error || null,
-    code: result.code || null,
-    errno: result.errno || null,
-    syscall: result.syscall || null,
-    hostname: result.hostname || 'smtp.gmail.com',
-    address: result.address || null,
-    stack: result.stack || null,
-    summary
-  });
-});
-
-app.get('/api/test-port-587', async (req, res) => {
-  const result = await testTcpConnection('smtp.gmail.com', 587, 20000);
-  const summary = {
-    dnsWorking: true,
-    tcp587Accessible: result.ok,
-    probableCause: result.ok ? null : 'Render não consegue estabelecer conexão TCP com smtp.gmail.com:587.'
-  };
-
-  return res.json({
-    ok: result.ok,
-    host: 'smtp.gmail.com',
-    port: 587,
-    connectedInMs: result.connectedInMs || 0,
-    error: result.error || null,
-    code: result.code || null,
-    errno: result.errno || null,
-    syscall: result.syscall || null,
-    hostname: result.hostname || 'smtp.gmail.com',
-    address: result.address || null,
-    stack: result.stack || null,
-    summary
-  });
-});
-
-app.get('/api/test-tls', async (req, res) => {
-  const result = await testTlsHandshake('smtp.gmail.com', 465, 20000);
-  return res.json(result);
-});
-
-app.get('/api/test-smtp-verify', async (req, res) => {
-  const result = await testSmtpVerify({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-    requireTLS: false,
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-    label: 'GMAIL_465'
-  });
-
-  const summary = {
-    dnsWorking: true,
-    tcp465Accessible: false,
-    tlsHandshakeOk: false,
-    credentialsLoaded: Boolean(process.env.SMTP_USER && process.env.SMTP_PASS),
-    nodemailerStarted: true,
-    likelyCause: result.ok ? null : 'Render não consegue estabelecer conexão TCP ou TLS com o servidor SMTP do Gmail.'
-  };
-
-  if (result.ok) {
-    summary.tcp465Accessible = true;
-    summary.tlsHandshakeOk = true;
-  }
-
-  return res.json({ ...result, summary });
-});
-
-app.get('/api/test-smtp-verify-587', async (req, res) => {
-  const result = await testSmtpVerify({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    requireTLS: true,
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-    label: 'GMAIL_587'
-  });
-
-  const summary = {
-    dnsWorking: true,
-    tcp587Accessible: false,
-    tlsHandshakeOk: false,
-    credentialsLoaded: Boolean(process.env.SMTP_USER && process.env.SMTP_PASS),
-    nodemailerStarted: true,
-    likelyCause: result.ok ? null : 'Render não consegue estabelecer conexão TCP ou TLS com o servidor SMTP do Gmail.'
-  };
-
-  if (result.ok) {
-    summary.tcp587Accessible = true;
-    summary.tlsHandshakeOk = true;
-  }
-
-  return res.json({ ...result, summary });
-});
-
-app.get('/api/diagnostics/dns', async (req, res) => {
-  console.log('[DNS] Iniciando teste');
-  const startedAt = Date.now();
-
-  try {
-    const result = await testDnsResolution('smtp.gmail.com');
-    const elapsedMs = Date.now() - startedAt;
-    console.log('[DNS] Endereços encontrados', { hostname: 'smtp.gmail.com', addresses: result.addresses || [], elapsedMs });
-    console.log('[DNS] Tempo de resolução', { hostname: 'smtp.gmail.com', elapsedMs });
-
-    return res.json({
-      ok: Boolean(result.ok),
-      hostname: 'smtp.gmail.com',
-      addresses: result.addresses || [],
-      elapsedMs,
-      resolvedIp: result.usedIp || null,
-      code: result.code || null,
-      message: result.message || null
-    });
-  } catch (error) {
-    console.error('[DNS] Erro no teste', {
-      message: error.message || 'unknown',
-      code: error.code || null,
-      errno: error.errno || null,
-      syscall: error.syscall || null,
-      hostname: 'smtp.gmail.com',
-      address: null,
-      port: null,
-      stack: error.stack || null
-    });
-
-    return res.status(500).json({
-      ok: false,
-      hostname: 'smtp.gmail.com',
-      message: error.message || 'Erro ao resolver DNS.',
-      code: error.code || null,
-      errno: error.errno || null,
-      syscall: error.syscall || null,
-      hostname: 'smtp.gmail.com',
-      address: null,
-      port: null,
-      stack: error.stack || null
-    });
-  }
-});
-
-app.get('/api/diagnostics/port465', async (req, res) => {
-  console.log('[NET] Conectando porta 465');
-  const startedAt = Date.now();
-  const result = await testTcpConnection('smtp.gmail.com', 465, 20000);
-  const connectedInMs = Date.now() - startedAt;
-
-  if (result.ok) {
-    console.log('[NET] Conectado', { host: 'smtp.gmail.com', port: 465, connectedInMs });
-    return res.json({ ok: true, host: 'smtp.gmail.com', port: 465, connectedInMs });
-  }
-
-  console.error('[NET] Timeout', {
-    message: result.error || 'Connection timeout',
-    code: result.code || 'ETIMEDOUT',
-    errno: result.errno || null,
-    syscall: result.syscall || null,
-    hostname: 'smtp.gmail.com',
-    address: result.address || null,
-    port: 465,
-    stack: result.stack || null
-  });
-
-  return res.status(500).json({
-    ok: false,
-    host: 'smtp.gmail.com',
-    port: 465,
-    code: result.code || 'ETIMEDOUT',
-    message: result.error || 'Connection timeout',
-    errno: result.errno || null,
-    syscall: result.syscall || null,
-    hostname: 'smtp.gmail.com',
-    address: result.address || null,
-    port: 465,
-    stack: result.stack || null,
-    connectedInMs
-  });
-});
-
-app.get('/api/diagnostics/port587', async (req, res) => {
-  console.log('[NET] Conectando porta 587');
-  const startedAt = Date.now();
-  const result = await testTcpConnection('smtp.gmail.com', 587, 20000);
-  const connectedInMs = Date.now() - startedAt;
-
-  if (result.ok) {
-    console.log('[NET] Conectado', { host: 'smtp.gmail.com', port: 587, connectedInMs });
-    return res.json({ ok: true, host: 'smtp.gmail.com', port: 587, connectedInMs });
-  }
-
-  console.error('[NET] Timeout', {
-    message: result.error || 'Connection timeout',
-    code: result.code || 'ETIMEDOUT',
-    errno: result.errno || null,
-    syscall: result.syscall || null,
-    hostname: 'smtp.gmail.com',
-    address: result.address || null,
-    port: 587,
-    stack: result.stack || null
-  });
-
-  return res.status(500).json({
-    ok: false,
-    host: 'smtp.gmail.com',
-    port: 587,
-    code: result.code || 'ETIMEDOUT',
-    message: result.error || 'Connection timeout',
-    errno: result.errno || null,
-    syscall: result.syscall || null,
-    hostname: 'smtp.gmail.com',
-    address: result.address || null,
-    port: 587,
-    stack: result.stack || null,
-    connectedInMs
-  });
-});
-
-app.get('/api/diagnostics/tls', async (req, res) => {
-  console.log('[TLS] Iniciando handshake');
-  const result = await testTlsHandshake('smtp.gmail.com', 465, 20000);
-
-  if (result.ok) {
-    console.log('[TLS] Handshake concluído', result);
-    return res.json({
-      ok: true,
-      authorized: Boolean(result.authorized),
-      protocol: result.protocol || null,
-      cipher: result.cipher || null,
-      servername: result.hostname || 'smtp.gmail.com',
-      peerCertificate: result.peerCertificate || null,
-      authorizationError: result.authorizationError || null
-    });
-  }
-
-  console.error('[TLS] Erro', {
-    message: result.error || 'TLS handshake failed',
-    code: result.code || null,
-    errno: result.errno || null,
-    syscall: result.syscall || null,
-    hostname: 'smtp.gmail.com',
-    address: null,
-    port: 465,
-    stack: result.stack || null
-  });
-
-  return res.status(500).json({
-    ok: false,
-    message: result.error || 'TLS handshake failed',
-    code: result.code || null,
-    errno: result.errno || null,
-    syscall: result.syscall || null,
-    hostname: 'smtp.gmail.com',
-    address: null,
-    port: 465,
-    stack: result.stack || null,
-    protocol: result.protocol || null,
-    cipher: result.cipher || null,
-    servername: result.hostname || 'smtp.gmail.com'
-  });
-});
-
-app.get('/api/diagnostics/smtp465', async (req, res) => {
-  const startedAt = Date.now();
-  console.log('[SMTP] Iniciando verify 465');
-
-  const result = await testSmtpVerify({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-    requireTLS: false,
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-    label: 'GMAIL_465'
-  });
-
-  const elapsedMs = Date.now() - startedAt;
-  console.log('[SMTP] Fim verify 465', { elapsedMs, ok: result.ok, code: result.code || null });
-
-  if (result.ok) {
-    return res.json({ ok: true, elapsedMs, host: 'smtp.gmail.com', port: 465, secure: true });
-  }
-
-  return res.status(500).json({
-    ok: false,
-    code: result.code || 'SMTP_VERIFY_FAILED',
-    message: result.message || 'SMTP verify failed',
-    errno: result.errno || null,
-    syscall: result.syscall || null,
-    hostname: 'smtp.gmail.com',
-    address: null,
-    port: 465,
-    stack: result.stack || null,
-    elapsedMs
-  });
-});
-
-app.get('/api/diagnostics/smtp587', async (req, res) => {
-  const startedAt = Date.now();
-  console.log('[SMTP] Iniciando verify 587');
-
-  const result = await testSmtpVerify({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    requireTLS: true,
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-    label: 'GMAIL_587'
-  });
-
-  const elapsedMs = Date.now() - startedAt;
-  console.log('[SMTP] Fim verify 587', { elapsedMs, ok: result.ok, code: result.code || null });
-
-  if (result.ok) {
-    return res.json({ ok: true, elapsedMs, host: 'smtp.gmail.com', port: 587, secure: false, requireTLS: true });
-  }
-
-  return res.status(500).json({
-    ok: false,
-    code: result.code || 'SMTP_VERIFY_FAILED',
-    message: result.message || 'SMTP verify failed',
-    errno: result.errno || null,
-    syscall: result.syscall || null,
-    hostname: 'smtp.gmail.com',
-    address: null,
-    port: 587,
-    stack: result.stack || null,
-    elapsedMs
-  });
-});
-
-app.get('/api/diagnostics/report', async (req, res) => {
-  const dnsResult = await testDnsResolution('smtp.gmail.com');
-  const port465 = await testTcpConnection('smtp.gmail.com', 465, 20000);
-  const port587 = await testTcpConnection('smtp.gmail.com', 587, 20000);
-  const tlsResult = await testTlsHandshake('smtp.gmail.com', 465, 20000);
-  const smtp465 = await testSmtpVerify({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-    requireTLS: false,
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-    label: 'REPORT_465'
-  });
-  const smtp587 = await testSmtpVerify({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    requireTLS: true,
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-    label: 'REPORT_587'
-  });
-
-  const report = {
-    dns: { status: dnsResult.ok ? 'OK' : 'FAIL', details: dnsResult },
-    port465: { status: port465.ok ? 'OK' : 'FAIL', details: port465 },
-    port587: { status: port587.ok ? 'OK' : 'FAIL', details: port587 },
-    tls: { status: tlsResult.ok ? 'OK' : 'FAIL', details: tlsResult },
-    smtp465: { status: smtp465.ok ? 'OK' : 'FAIL', details: smtp465 },
-    smtp587: { status: smtp587.ok ? 'OK' : 'FAIL', details: smtp587 },
-    diagnosis: dnsResult.ok
-      ? 'DNS resolve corretamente. O problema provável é que o Render não consegue estabelecer conexão TCP/TLS com smtp.gmail.com, impedindo que o Nodemailer chegue na autenticação do Gmail.'
-      : 'DNS falhou ao resolver smtp.gmail.com, então a falha ocorre antes da conexão TCP.'
-  };
-
-  console.log('[DIAG] Relatório consolidado', report);
-  return res.json(report);
-});
-
 app.post('/api/update-access/login', (req, res) => {
   try {
     const { email, password } = req.body || {};
@@ -1887,11 +918,8 @@ app.post('/api/update-access/request', async (req, res) => {
 
     pendingRequests.push(nextRequest);
     await savePendingAccessRequests(pendingRequests);
-    const emailResult = await notifyApproversAboutAccessRequest(nextRequest);
-    console.log('[AccessControl] Resultado do envio de e-mail para aprovadores', {
-      requestId: nextRequest.id,
-      ok: emailResult?.ok,
-      reason: emailResult?.reason || 'nenhum problema'
+    await notifyNewAccessRequest(nextRequest).catch((error) => {
+      console.error('[AccessControl] falha ao enviar e-mail de nova solicitação', error?.message || error);
     });
     console.log('[AccessControl] solicitação salva com sucesso', { requestId: nextRequest.id, file: 'config/access-requests.json' });
 
@@ -1914,7 +942,7 @@ app.get('/api/update-access/requests', async (req, res) => {
 
 app.post('/api/update-access/approve', async (req, res) => {
   try {
-    const { requestId, approved = true, actorEmail, actorPassword, canApprove = false } = req.body || {};
+    const { requestId, approved = true, actorEmail, actorPassword, canApprove = false, actorName } = req.body || {};
     const actor = getAccessControlState(actorEmail || req.headers['x-user-email'] || '', actorPassword || req.headers['x-user-password'] || '');
 
     if (!actor.isAuthorized || !actor.canApprove) {
@@ -1955,17 +983,8 @@ app.post('/api/update-access/approve', async (req, res) => {
 
     await savePendingAccessRequests(pendingRequests);
     await saveAccessControlConfig({ ...config, enabled: true, users: nextUsers });
-    const decisionEmailResult = await notifyRequesterAboutAccessDecision({
-      name: foundRequest.name,
-      email: foundRequest.email,
-      status: approved ? 'approved' : 'rejected',
-      approver: actorEmail || req.headers['x-user-email'] || 'Sistema'
-    });
-    console.log('[AccessControl] Resultado do e-mail de decisão da solicitação', {
-      requestId: foundRequest.id,
-      approved: Boolean(approved),
-      ok: decisionEmailResult?.ok,
-      reason: decisionEmailResult?.reason || 'nenhum problema'
+    await notifyAccessDecision(foundRequest, approved ? 'approved' : 'rejected', actorName || actorEmail || 'Administrador').catch((error) => {
+      console.error('[AccessControl] falha ao enviar e-mail de decisão da solicitação', error?.message || error);
     });
 
     res.json({ ok: true, approved: Boolean(approved), users: nextUsers, request: foundRequest });
@@ -1995,16 +1014,8 @@ app.post('/api/update-access/reject', async (req, res) => {
     foundRequest.resolvedBy = actorEmail || req.headers['x-user-email'] || '';
 
     await savePendingAccessRequests(pendingRequests);
-    const rejectEmailResult = await notifyRequesterAboutAccessDecision({
-      name: foundRequest.name,
-      email: foundRequest.email,
-      status: 'rejected',
-      approver: actorEmail || req.headers['x-user-email'] || 'Sistema'
-    });
-    console.log('[AccessControl] Resultado do e-mail de rejeição', {
-      requestId: foundRequest.id,
-      ok: rejectEmailResult?.ok,
-      reason: rejectEmailResult?.reason || 'nenhum problema'
+    await notifyAccessDecision(foundRequest, 'rejected', actorEmail || req.headers['x-user-email'] || 'Administrador').catch((error) => {
+      console.error('[AccessControl] falha ao enviar e-mail de rejeição da solicitação', error?.message || error);
     });
 
     res.json({ ok: true, rejected: true, request: foundRequest });
