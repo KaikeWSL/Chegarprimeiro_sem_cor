@@ -55,7 +55,9 @@
     "email": "kaike.wesley1112@claro.com.br",
     "password": "1",
     "requestedAt": "2026-10-21T11:39:44.755Z",
-    "status": "pending"
+    "status": "rejected",
+    "updatedAt": "2026-10-21T15:42:14.946Z",
+    "resolvedBy": "andre.dasilvarodrigues@claro.com.br"
   },
   {
     "id": "req-1792583095409",
