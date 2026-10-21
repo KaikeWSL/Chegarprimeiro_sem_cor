@@ -70,5 +70,13 @@
     "password": "123",
     "requestedAt": "2026-10-21T11:53:16.464Z",
     "status": "pending"
+  },
+  {
+    "id": "req-1792584399210",
+    "name": "teste",
+    "email": "teste1@claro.com.br",
+    "password": "123",
+    "requestedAt": "2026-10-21T12:06:39.210Z",
+    "status": "pending"
   }
 ]
