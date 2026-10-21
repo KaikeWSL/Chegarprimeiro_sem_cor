@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "id": "req-1792576840903",
+    "name": "dwad",
+    "email": "kaike.wesley12@claro.com.br",
+    "password": "1234",
+    "requestedAt": "2026-10-21T10:00:40.903Z",
+    "status": "pending"
+  }
+]
