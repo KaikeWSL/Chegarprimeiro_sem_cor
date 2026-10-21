@@ -83,7 +83,9 @@
     "email": "teste1@claro.com.br",
     "password": "123",
     "requestedAt": "2026-10-21T12:06:39.210Z",
-    "status": "pending"
+    "status": "rejected",
+    "updatedAt": "2026-10-21T15:42:18.810Z",
+    "resolvedBy": "andre.dasilvarodrigues@claro.com.br"
   },
   {
     "id": "req-1792585340680",
