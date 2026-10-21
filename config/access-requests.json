@@ -142,5 +142,13 @@
     "password": "123",
     "requestedAt": "2026-10-21T13:40:17.481Z",
     "status": "pending"
+  },
+  {
+    "id": "req-1792590521321",
+    "name": "dawdwa",
+    "email": "dwadwa@claro.com.br",
+    "password": "dwadaw",
+    "requestedAt": "2026-10-21T13:48:41.321Z",
+    "status": "pending"
   }
 ]
