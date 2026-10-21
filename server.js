@@ -82,8 +82,46 @@ function getAccessControlConfig() {
   }
 }
 
-function saveAccessControlConfig(config) {
-  fs.writeFileSync(accessControlFile, JSON.stringify(config, null, 2));
+async function saveAccessControlConfig(config) {
+  const safeConfig = config && typeof config === 'object' ? config : DEFAULT_ACCESS_CONTROL;
+  const { GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO } = process.env;
+  const githubPath = 'config/access-control.json';
+
+  if (GITHUB_TOKEN && GITHUB_OWNER && GITHUB_REPO) {
+    try {
+      const octokit = new Octokit({ auth: GITHUB_TOKEN });
+      const currentFile = await octokit.repos.getContent({ owner: GITHUB_OWNER, repo: GITHUB_REPO, path: githubPath }).catch((error) => {
+        if (error?.status === 404) {
+          return null;
+        }
+        throw error;
+      });
+
+      const encodedContent = Buffer.from(JSON.stringify(safeConfig, null, 2), 'utf8').toString('base64');
+      await octokit.repos.createOrUpdateFileContents({
+        owner: GITHUB_OWNER,
+        repo: GITHUB_REPO,
+        path: githubPath,
+        message: `Atualizar configuração de acesso (${safeConfig?.enabled ? 'ativa' : 'inativa'})`,
+        content: encodedContent,
+        sha: currentFile?.data?.sha || undefined
+      });
+
+      console.log('[AccessControl] config salva no GitHub', {
+        file: githubPath,
+        users: safeConfig?.users?.length || 0,
+        enabled: safeConfig?.enabled
+      });
+    } catch (error) {
+      console.error('[AccessControl] falha ao salvar config no GitHub', error?.message || error);
+    }
+  }
+
+  fs.mkdirSync(path.dirname(accessControlFile), { recursive: true });
+  fs.writeFileSync(accessControlFile, JSON.stringify(safeConfig, null, 2));
+  console.log('[AccessControl] config salva no storage local', { file: accessControlFile, users: safeConfig?.users?.length || 0 });
+
+  return safeConfig;
 }
 
 async function getPendingAccessRequests() {
@@ -852,7 +890,7 @@ app.post('/api/update-access/approve', async (req, res) => {
     foundRequest.resolvedBy = actorEmail || req.headers['x-user-email'] || '';
 
     await savePendingAccessRequests(pendingRequests);
-    saveAccessControlConfig({ ...config, enabled: true, users: nextUsers });
+    await saveAccessControlConfig({ ...config, enabled: true, users: nextUsers });
 
     res.json({ ok: true, approved: Boolean(approved), users: nextUsers, request: foundRequest });
   } catch (error) {
