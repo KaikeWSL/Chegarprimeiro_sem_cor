@@ -3,6 +3,8 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const dns = require('dns');
+const net = require('net');
+const tls = require('tls');
 const nodemailer = require('nodemailer');
 const XLSX = require('xlsx');
 const { Octokit } = require('@octokit/rest');
@@ -322,6 +324,257 @@ async function verifySmtpTransport({ host, port, secure, requireTLS, user, pass,
       requireTLS,
       resolvedIp: dnsResult.ip
     };
+  }
+}
+
+async function testDnsResolution(hostname) {
+  const startedAt = Date.now();
+  console.log('[DNS] Resolvendo hostname', { hostname });
+
+  return new Promise((resolve) => {
+    dns.lookup(hostname, { all: true }, (error, addresses) => {
+      const resolutionMs = Date.now() - startedAt;
+
+      if (error) {
+        const payload = {
+          ok: false,
+          hostname,
+          addresses: [],
+          resolutionMs,
+          message: error.message,
+          code: error.code || null,
+          errno: error.errno || null,
+          syscall: error.syscall || null,
+          hostname: hostname,
+          address: null,
+          port: null,
+          stack: error.stack || null
+        };
+
+        console.error('[DNS] falha de resolução', payload);
+        resolve(payload);
+        return;
+      }
+
+      const record = Array.isArray(addresses) ? addresses : [addresses];
+      const payload = {
+        ok: true,
+        hostname,
+        addresses: record.map((item) => typeof item === 'string' ? item : item.address),
+        resolutionMs,
+        usedIp: record[0] && typeof record[0] === 'object' ? record[0].address : record[0] || null,
+        family: record[0] && typeof record[0] === 'object' ? record[0].family : null,
+        error: null,
+        code: null
+      };
+
+      console.log('[DNS] resolução ok', payload);
+      resolve(payload);
+    });
+  });
+}
+
+async function testTcpConnection(host, port, timeoutMs = 20000) {
+  const startedAt = Date.now();
+  console.log('[NET] iniciando TCP connect', { host, port, timeoutMs });
+
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    let settled = false;
+
+    const finish = (payload) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      console.log('[NET] resultado TCP', payload);
+      resolve(payload);
+    };
+
+    socket.setTimeout(timeoutMs);
+
+    socket.once('connect', () => {
+      finish({
+        ok: true,
+        host,
+        port,
+        connectedInMs: Date.now() - startedAt,
+        timeoutMs,
+        error: null,
+        code: null
+      });
+    });
+
+    socket.once('timeout', () => {
+      finish({
+        ok: false,
+        host,
+        port,
+        connectedInMs: Date.now() - startedAt,
+        timeoutMs,
+        error: 'Connection timeout',
+        code: 'ETIMEDOUT',
+        errno: null,
+        syscall: 'connect',
+        hostname: host,
+        address: null,
+        stack: null
+      });
+    });
+
+    socket.once('error', (error) => {
+      finish({
+        ok: false,
+        host,
+        port,
+        connectedInMs: Date.now() - startedAt,
+        timeoutMs,
+        error: error.message || 'TCP connection failed',
+        code: error.code || null,
+        errno: error.errno || null,
+        syscall: error.syscall || null,
+        hostname: host,
+        address: null,
+        stack: error.stack || null
+      });
+    });
+
+    socket.connect(port, host);
+  });
+}
+
+async function testTlsHandshake(host, port, timeoutMs = 20000) {
+  const startedAt = Date.now();
+  console.log('[TLS] iniciando handshake', { host, port, timeoutMs });
+
+  return new Promise((resolve) => {
+    const socket = tls.connect({
+      host,
+      port,
+      servername: host,
+      rejectUnauthorized: false,
+      timeout: timeoutMs
+    }, () => {
+      const info = {
+        ok: true,
+        host,
+        port,
+        protocol: socket.getProtocol(),
+        cipher: socket.getCipher && socket.getCipher ? socket.getCipher() : null,
+        peerCertificate: socket.getPeerCertificate ? socket.getPeerCertificate() : null,
+        hostname: socket.servername || host,
+        handshakeMs: Date.now() - startedAt,
+        authorized: socket.authorized || false,
+        authorizationError: socket.authorizationError ? socket.authorizationError.message : null
+      };
+
+      console.log('[TLS] handshake ok', info);
+      socket.destroy();
+      resolve(info);
+    });
+
+    socket.on('timeout', () => {
+      const payload = {
+        ok: false,
+        host,
+        port,
+        protocol: null,
+        cipher: null,
+        peerCertificate: null,
+        hostname: host,
+        error: 'TLS timeout',
+        code: 'ETIMEDOUT',
+        errno: null,
+        syscall: 'tls.connect',
+        stack: null,
+        handshakeMs: Date.now() - startedAt
+      };
+      console.error('[TLS] timeout', payload);
+      socket.destroy();
+      resolve(payload);
+    });
+
+    socket.on('error', (error) => {
+      const payload = {
+        ok: false,
+        host,
+        port,
+        protocol: null,
+        cipher: null,
+        peerCertificate: null,
+        hostname: host,
+        error: error.message || 'TLS handshake failed',
+        code: error.code || null,
+        errno: error.errno || null,
+        syscall: error.syscall || null,
+        stack: error.stack || null,
+        handshakeMs: Date.now() - startedAt
+      };
+      console.error('[TLS] falha', payload);
+      socket.destroy();
+      resolve(payload);
+    });
+  });
+}
+
+async function testSmtpVerify({ host, port, secure, requireTLS, user, pass, label }) {
+  const startedAt = Date.now();
+  console.log(`[SMTP] iniciando verify`, { label, host, port, secure, requireTLS, user: Boolean(user) });
+
+  const transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    requireTLS,
+    auth: user && pass ? { user, pass } : undefined,
+    connectionTimeout: 60000,
+    greetingTimeout: 60000,
+    socketTimeout: 60000,
+    logger: true,
+    debug: true,
+    tls: {
+      ciphers: 'SSLv3',
+      rejectUnauthorized: false
+    }
+  });
+
+  try {
+    const result = await transporter.verify();
+    const payload = {
+      ok: true,
+      host,
+      port,
+      secure,
+      requireTLS,
+      startedAt,
+      elapsedMs: Date.now() - startedAt,
+      result,
+      summary: 'SMTP verify ok'
+    };
+
+    console.log('[SMTP] verify ok', payload);
+    return payload;
+  } catch (error) {
+    const payload = {
+      ok: false,
+      host,
+      port,
+      secure,
+      requireTLS,
+      startedAt,
+      elapsedMs: Date.now() - startedAt,
+      message: error.message || 'SMTP verify failed',
+      code: error.code || null,
+      errno: error.errno || null,
+      syscall: error.syscall || null,
+      hostname: host,
+      address: null,
+      port,
+      stack: error.stack || null,
+      summary: 'SMTP verify falhou'
+    };
+
+    console.error('[SMTP] verify falhou', payload);
+    return payload;
   }
 }
 
@@ -1141,59 +1394,145 @@ app.get('/api/update-access/status', (req, res) => {
   }
 });
 
-app.get('/api/test-smtp', async (req, res) => {
-  const baseUser = process.env.SMTP_USER || 'kaike.wesley12@gmail.com';
-  const basePass = process.env.SMTP_PASS || '';
-  const modes = [
-    {
-      label: 'MODE_A',
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
-      requireTLS: false,
-      user: baseUser,
-      pass: basePass
-    },
-    {
-      label: 'MODE_B',
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false,
-      requireTLS: true,
-      user: baseUser,
-      pass: basePass
-    }
-  ];
+app.get('/api/test-network', async (req, res) => {
+  try {
+    const dnsResult = await testDnsResolution('smtp.gmail.com');
+    const summary = {
+      dnsWorking: dnsResult.ok,
+      credentialsLoaded: Boolean(process.env.SMTP_USER && process.env.SMTP_PASS),
+      nodemailerStarted: true,
+      likelyCause: dnsResult.ok ? 'Render não consegue estabelecer conexão TCP com o servidor SMTP do Gmail.' : 'DNS falhou ao resolver smtp.gmail.com.'
+    };
 
-  const results = [];
-
-  for (const mode of modes) {
-    const result = await verifySmtpTransport(mode);
-    results.push({ mode: mode.label, ...result });
-  }
-
-  const success = results.find((item) => item.ok);
-  if (success) {
     return res.json({
-      ok: true,
-      code: null,
-      message: 'SMTP verified successfully.',
-      mode: success.mode,
-      results
+      ok: dnsResult.ok,
+      hostname: 'smtp.gmail.com',
+      addresses: dnsResult.addresses || [],
+      resolutionMs: dnsResult.resolutionMs || 0,
+      usedIp: dnsResult.usedIp || null,
+      summary
+    });
+  } catch (error) {
+    console.error('[NET] falha em /api/test-network', error);
+    return res.status(500).json({
+      ok: false,
+      hostname: 'smtp.gmail.com',
+      message: error.message || 'Erro ao testar DNS.',
+      code: error.code || null,
+      errno: error.errno || null,
+      syscall: error.syscall || null,
+      stack: error.stack || null
     });
   }
+});
 
-  const failure = results.find((item) => !item.ok) || results[0] || {};
-  return res.status(500).json({
-    ok: false,
-    code: failure.code || 'SMTP_TEST_FAILED',
-    message: failure.message || 'SMTP verification failed.',
-    stage: failure.stage || 'TCP',
-    command: failure.command || null,
-    response: failure.response || null,
-    stack: failure.stack || null,
-    results
+app.get('/api/test-port-465', async (req, res) => {
+  const result = await testTcpConnection('smtp.gmail.com', 465, 20000);
+  const summary = {
+    dnsWorking: true,
+    tcp465Accessible: result.ok,
+    probableCause: result.ok ? null : 'Render não consegue estabelecer conexão TCP com smtp.gmail.com:465.'
+  };
+
+  return res.json({
+    ok: result.ok,
+    host: 'smtp.gmail.com',
+    port: 465,
+    connectedInMs: result.connectedInMs || 0,
+    error: result.error || null,
+    code: result.code || null,
+    errno: result.errno || null,
+    syscall: result.syscall || null,
+    hostname: result.hostname || 'smtp.gmail.com',
+    address: result.address || null,
+    stack: result.stack || null,
+    summary
   });
+});
+
+app.get('/api/test-port-587', async (req, res) => {
+  const result = await testTcpConnection('smtp.gmail.com', 587, 20000);
+  const summary = {
+    dnsWorking: true,
+    tcp587Accessible: result.ok,
+    probableCause: result.ok ? null : 'Render não consegue estabelecer conexão TCP com smtp.gmail.com:587.'
+  };
+
+  return res.json({
+    ok: result.ok,
+    host: 'smtp.gmail.com',
+    port: 587,
+    connectedInMs: result.connectedInMs || 0,
+    error: result.error || null,
+    code: result.code || null,
+    errno: result.errno || null,
+    syscall: result.syscall || null,
+    hostname: result.hostname || 'smtp.gmail.com',
+    address: result.address || null,
+    stack: result.stack || null,
+    summary
+  });
+});
+
+app.get('/api/test-tls', async (req, res) => {
+  const result = await testTlsHandshake('smtp.gmail.com', 465, 20000);
+  return res.json(result);
+});
+
+app.get('/api/test-smtp-verify', async (req, res) => {
+  const result = await testSmtpVerify({
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    requireTLS: false,
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+    label: 'GMAIL_465'
+  });
+
+  const summary = {
+    dnsWorking: true,
+    tcp465Accessible: false,
+    tlsHandshakeOk: false,
+    credentialsLoaded: Boolean(process.env.SMTP_USER && process.env.SMTP_PASS),
+    nodemailerStarted: true,
+    likelyCause: result.ok ? null : 'Render não consegue estabelecer conexão TCP ou TLS com o servidor SMTP do Gmail.'
+  };
+
+  if (result.ok) {
+    summary.tcp465Accessible = true;
+    summary.tlsHandshakeOk = true;
+  }
+
+  return res.json({ ...result, summary });
+});
+
+app.get('/api/test-smtp-verify-587', async (req, res) => {
+  const result = await testSmtpVerify({
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    requireTLS: true,
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+    label: 'GMAIL_587'
+  });
+
+  const summary = {
+    dnsWorking: true,
+    tcp587Accessible: false,
+    tlsHandshakeOk: false,
+    credentialsLoaded: Boolean(process.env.SMTP_USER && process.env.SMTP_PASS),
+    nodemailerStarted: true,
+    likelyCause: result.ok ? null : 'Render não consegue estabelecer conexão TCP ou TLS com o servidor SMTP do Gmail.'
+  };
+
+  if (result.ok) {
+    summary.tcp587Accessible = true;
+    summary.tlsHandshakeOk = true;
+  }
+
+  return res.json({ ...result, summary });
 });
 
 app.post('/api/update-access/login', (req, res) => {
