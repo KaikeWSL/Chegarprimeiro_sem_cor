@@ -102,9 +102,21 @@ function createMailTransporter() {
   const port = Number(process.env.SMTP_PORT || 587);
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
+  const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER;
+
+  console.log('[Mail] Validando configuração SMTP', {
+    host,
+    port,
+    hasUser: Boolean(user),
+    hasPass: Boolean(pass),
+    hasFrom: Boolean(fromAddress),
+    smtpUser: user || 'não informado',
+    smtpFrom: fromAddress || 'não informado'
+  });
 
   if (!user || !pass) {
-    console.warn('[Mail] SMTP não configurado. Defina SMTP_HOST, SMTP_PORT, SMTP_USER e SMTP_PASS para enviar e-mails.');
+    console.warn('[Mail] SMTP não configurado. Faltando SMTP_USER ou SMTP_PASS.');
+    console.warn('[Mail] Variáveis esperadas: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM.');
     return null;
   }
 
@@ -123,17 +135,26 @@ function createMailTransporter() {
 async function sendAccessNotificationEmail({ to, subject, text, html }) {
   const transporter = createMailTransporter();
   if (!transporter) {
+    console.warn('[Mail] Bloqueando envio: transporte SMTP indisponível.');
     return { ok: false, reason: 'SMTP não configurado' };
   }
 
   const recipientList = Array.isArray(to) ? to.filter(Boolean) : [to].filter(Boolean);
   if (!recipientList.length) {
+    console.warn('[Mail] Bloqueando envio: nenhum destinatário encontrado.', { to, subject });
     return { ok: false, reason: 'nenhum destinatário encontrado' };
   }
 
   try {
     const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER;
-    await transporter.sendMail({
+    console.log('[Mail] Tentando enviar e-mail', {
+      from: fromAddress,
+      to: recipientList,
+      subject,
+      textLength: String(text || '').length
+    });
+
+    const result = await transporter.sendMail({
       from: fromAddress,
       to: recipientList.join(', '),
       subject,
@@ -141,18 +162,36 @@ async function sendAccessNotificationEmail({ to, subject, text, html }) {
       html
     });
 
-    console.log('[Mail] e-mail enviado com sucesso', { to: recipientList, subject });
-    return { ok: true };
+    console.log('[Mail] E-mail enviado com sucesso', {
+      messageId: result?.messageId,
+      accepted: result?.accepted || recipientList,
+      rejected: result?.rejected || [],
+      subject
+    });
+    return { ok: true, result };
   } catch (error) {
-    console.error('[Mail] falha ao enviar e-mail', error?.message || error);
+    console.error('[Mail] Falha ao enviar e-mail', {
+      subject,
+      to: recipientList,
+      errorMessage: error?.message || String(error),
+      code: error?.code || null,
+      response: error?.response || null,
+      stack: error?.stack || null
+    });
     return { ok: false, reason: error?.message || 'falha no envio' };
   }
 }
 
 async function notifyApproversAboutAccessRequest(request) {
   const recipients = getAccessApproverEmails();
+  console.log('[Mail] Preparando alerta para aprovadores', {
+    recipients,
+    requestEmail: request?.email,
+    requestName: request?.name
+  });
+
   if (!recipients.length) {
-    console.warn('[Mail] nenhuma conta de aprovador configurada para receber o alerta de acesso.');
+    console.warn('[Mail] Nenhum aprovador encontrado com canApprove: true e authorized: true.');
     return { ok: false, reason: 'sem aprovadores' };
   }
 
@@ -165,7 +204,7 @@ async function notifyApproversAboutAccessRequest(request) {
     'Acesse o painel para aprovar ou rejeitar a solicitação.'
   ].join('\n');
 
-  return sendAccessNotificationEmail({
+  const result = await sendAccessNotificationEmail({
     to: recipients,
     subject,
     text,
@@ -179,6 +218,14 @@ async function notifyApproversAboutAccessRequest(request) {
       </div>
     `
   });
+
+  console.log('[Mail] Resultado do alerta para aprovadores', {
+    ok: result?.ok,
+    reason: result?.reason || 'nenhum problema',
+    recipients
+  });
+
+  return result;
 }
 
 async function notifyRequesterAboutAccessDecision({ name, email, status, approver }) {
@@ -195,7 +242,15 @@ async function notifyRequesterAboutAccessDecision({ name, email, status, approve
       : 'Seu acesso foi negado. Se achar que isso foi um erro, entre em contato com o responsável.'
   ].filter(Boolean).join('\n');
 
-  return sendAccessNotificationEmail({
+  console.log('[Mail] Preparando resposta ao solicitante', {
+    name,
+    email,
+    status,
+    approver,
+    subject
+  });
+
+  const result = await sendAccessNotificationEmail({
     to: email,
     subject,
     text,
@@ -209,6 +264,14 @@ async function notifyRequesterAboutAccessDecision({ name, email, status, approve
       </div>
     `
   });
+
+  console.log('[Mail] Resultado da resposta ao solicitante', {
+    ok: result?.ok,
+    reason: result?.reason || 'nenhum problema',
+    email
+  });
+
+  return result;
 }
 
 async function saveAccessControlConfig(config) {
@@ -961,7 +1024,12 @@ app.post('/api/update-access/request', async (req, res) => {
 
     pendingRequests.push(nextRequest);
     await savePendingAccessRequests(pendingRequests);
-    await notifyApproversAboutAccessRequest(nextRequest);
+    const emailResult = await notifyApproversAboutAccessRequest(nextRequest);
+    console.log('[AccessControl] Resultado do envio de e-mail para aprovadores', {
+      requestId: nextRequest.id,
+      ok: emailResult?.ok,
+      reason: emailResult?.reason || 'nenhum problema'
+    });
     console.log('[AccessControl] solicitação salva com sucesso', { requestId: nextRequest.id, file: 'config/access-requests.json' });
 
     res.json({ ok: true, request: nextRequest });
@@ -1024,11 +1092,17 @@ app.post('/api/update-access/approve', async (req, res) => {
 
     await savePendingAccessRequests(pendingRequests);
     await saveAccessControlConfig({ ...config, enabled: true, users: nextUsers });
-    await notifyRequesterAboutAccessDecision({
+    const decisionEmailResult = await notifyRequesterAboutAccessDecision({
       name: foundRequest.name,
       email: foundRequest.email,
       status: approved ? 'approved' : 'rejected',
       approver: actorEmail || req.headers['x-user-email'] || 'Sistema'
+    });
+    console.log('[AccessControl] Resultado do e-mail de decisão da solicitação', {
+      requestId: foundRequest.id,
+      approved: Boolean(approved),
+      ok: decisionEmailResult?.ok,
+      reason: decisionEmailResult?.reason || 'nenhum problema'
     });
 
     res.json({ ok: true, approved: Boolean(approved), users: nextUsers, request: foundRequest });
@@ -1058,11 +1132,16 @@ app.post('/api/update-access/reject', async (req, res) => {
     foundRequest.resolvedBy = actorEmail || req.headers['x-user-email'] || '';
 
     await savePendingAccessRequests(pendingRequests);
-    await notifyRequesterAboutAccessDecision({
+    const rejectEmailResult = await notifyRequesterAboutAccessDecision({
       name: foundRequest.name,
       email: foundRequest.email,
       status: 'rejected',
       approver: actorEmail || req.headers['x-user-email'] || 'Sistema'
+    });
+    console.log('[AccessControl] Resultado do e-mail de rejeição', {
+      requestId: foundRequest.id,
+      ok: rejectEmailResult?.ok,
+      reason: rejectEmailResult?.reason || 'nenhum problema'
     });
 
     res.json({ ok: true, rejected: true, request: foundRequest });
