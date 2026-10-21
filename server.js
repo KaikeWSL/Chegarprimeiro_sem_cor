@@ -13,7 +13,6 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
 const upload = multer({ dest: uploadDir });
 const accessControlFile = path.join(configDir, 'access-control.json');
-const accessRequestsFile = path.join(configDir, 'access-requests.json');
 
 const DEFAULT_ACCESS_CONTROL = {
   enabled: true,
@@ -87,21 +86,70 @@ function saveAccessControlConfig(config) {
   fs.writeFileSync(accessControlFile, JSON.stringify(config, null, 2));
 }
 
-function getPendingAccessRequests() {
-  const fallback = [];
-  return readJsonFile(accessRequestsFile, fallback);
+async function getPendingAccessRequests() {
+  const { GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO } = process.env;
+  const githubPath = 'config/access-requests.json';
+
+  if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
+    throw new Error('GITHUB_TOKEN, GITHUB_OWNER e GITHUB_REPO precisam estar configurados para persistir solicitações de acesso.');
+  }
+
+  try {
+    const octokit = new Octokit({ auth: GITHUB_TOKEN });
+    const response = await octokit.repos.getContent({ owner: GITHUB_OWNER, repo: GITHUB_REPO, path: githubPath });
+    const payload = response?.data;
+
+    if (Array.isArray(payload)) {
+      return [];
+    }
+
+    const raw = Buffer.from(String(payload?.content || ''), 'base64').toString('utf8');
+    const parsed = raw && raw.trim() ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    if (error?.status === 404) {
+      return [];
+    }
+    console.error('[AccessControl] erro ao ler fetch de solicitações no GitHub', error?.message || error);
+    return [];
+  }
 }
 
-function savePendingAccessRequests(requests) {
-  const safeRequests = Array.isArray(requests) ? requests : [];
-  fs.mkdirSync(path.dirname(accessRequestsFile), { recursive: true });
-  fs.writeFileSync(accessRequestsFile, JSON.stringify(safeRequests, null, 2));
+async function savePendingAccessRequests(requests) {
+  const { GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO } = process.env;
+  const githubPath = 'config/access-requests.json';
 
-  console.log('[AccessControl] salvar pedidos pendentes', {
-    file: accessRequestsFile,
+  if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
+    throw new Error('GITHUB_TOKEN, GITHUB_OWNER e GITHUB_REPO precisam estar configurados para persistir solicitações de acesso.');
+  }
+
+  const safeRequests = Array.isArray(requests) ? requests : [];
+  const octokit = new Octokit({ auth: GITHUB_TOKEN });
+  const currentFile = await octokit.repos.getContent({ owner: GITHUB_OWNER, repo: GITHUB_REPO, path: githubPath }).catch((error) => {
+    if (error?.status === 404) {
+      return null;
+    }
+    throw error;
+  });
+
+  const encodedContent = Buffer.from(JSON.stringify(safeRequests, null, 2), 'utf8').toString('base64');
+
+  await octokit.repos.createOrUpdateFileContents({
+    owner: GITHUB_OWNER,
+    repo: GITHUB_REPO,
+    path: githubPath,
+    message: `Atualizar solicitações de acesso (${safeRequests.length} pendentes)`,
+    content: encodedContent,
+    sha: currentFile?.data?.sha || undefined
+  });
+
+  console.log('[AccessControl] salvar pedidos pendentes no GitHub', {
+    file: githubPath,
     total: safeRequests.length,
     preview: safeRequests.slice(0, 2)
   });
+
+  return safeRequests;
 }
 
 function getUserByCredentials(email, password = '') {
@@ -695,19 +743,12 @@ app.post('/api/update-access/login', (req, res) => {
   }
 });
 
-app.post('/api/update-access/request', (req, res) => {
+app.post('/api/update-access/request', async (req, res) => {
   try {
     const { name, email, password } = req.body || {};
     const requestName = String(name || req.headers['x-user-name'] || '').trim();
     const requestEmail = String(email || req.headers['x-user-email'] || '').trim();
     const requestPassword = String(password || req.headers['x-user-password'] || '').trim();
-
-    console.log('[AccessControl] nova solicitação', {
-      requestName,
-      requestEmail,
-      hasPassword: !!requestPassword,
-      pendingRequests: getPendingAccessRequests()
-    });
 
     if (!requestName || !requestEmail || !requestPassword) {
       return res.status(400).json({ error: 'Nome, e-mail e senha são obrigatórios.' });
@@ -718,9 +759,16 @@ app.post('/api/update-access/request', (req, res) => {
     }
 
     const config = getAccessControlConfig();
-    const pendingRequests = getPendingAccessRequests();
+    const pendingRequests = await getPendingAccessRequests();
     const alreadyAuthorized = (config?.users || []).some((user) => normalizeAccessKey(user.email) === normalizeAccessKey(requestEmail));
     const exists = pendingRequests.some((request) => normalizeAccessKey(request.email) === normalizeAccessKey(requestEmail));
+
+    console.log('[AccessControl] nova solicitação', {
+      requestName,
+      requestEmail,
+      hasPassword: !!requestPassword,
+      pendingRequests: pendingRequests.length
+    });
 
     if (alreadyAuthorized) {
       return res.status(409).json({ error: 'Este e-mail já está autorizado.' });
@@ -745,21 +793,27 @@ app.post('/api/update-access/request', (req, res) => {
     };
 
     pendingRequests.push(nextRequest);
-    savePendingAccessRequests(pendingRequests);
-    console.log('[AccessControl] solicitação salva com sucesso', { requestId: nextRequest.id, file: accessRequestsFile });
+    await savePendingAccessRequests(pendingRequests);
+    console.log('[AccessControl] solicitação salva com sucesso', { requestId: nextRequest.id, file: 'config/access-requests.json' });
 
     res.json({ ok: true, request: nextRequest });
   } catch (error) {
+    console.error('[AccessControl] erro ao registrar solicitação', error);
     res.status(500).json({ error: error.message || 'Erro ao registrar solicitação de acesso.' });
   }
 });
 
-app.get('/api/update-access/requests', (req, res) => {
-  const requests = getPendingAccessRequests();
-  res.json({ ok: true, requests });
+app.get('/api/update-access/requests', async (req, res) => {
+  try {
+    const requests = await getPendingAccessRequests();
+    res.json({ ok: true, requests });
+  } catch (error) {
+    console.error('[AccessControl] erro ao listar solicitações', error);
+    res.status(500).json({ error: error.message || 'Erro ao listar solicitações.' });
+  }
 });
 
-app.post('/api/update-access/approve', (req, res) => {
+app.post('/api/update-access/approve', async (req, res) => {
   try {
     const { requestId, approved = true, actorEmail, actorPassword } = req.body || {};
     const actor = getAccessControlState(actorEmail || req.headers['x-user-email'] || '', actorPassword || req.headers['x-user-password'] || '');
@@ -768,7 +822,7 @@ app.post('/api/update-access/approve', (req, res) => {
       return res.status(403).json({ error: 'Você não tem permissão para autorizar acessos.' });
     }
 
-    const pendingRequests = getPendingAccessRequests();
+    const pendingRequests = await getPendingAccessRequests();
     const foundRequest = pendingRequests.find((request) => request.id === requestId);
     if (!foundRequest) {
       return res.status(404).json({ error: 'Solicitação não encontrada.' });
@@ -794,11 +848,12 @@ app.post('/api/update-access/approve', (req, res) => {
     }
 
     const filteredRequests = pendingRequests.filter((request) => request.id !== requestId);
-    savePendingAccessRequests(filteredRequests);
+    await savePendingAccessRequests(filteredRequests);
     saveAccessControlConfig({ ...config, enabled: true, users: nextUsers });
 
     res.json({ ok: true, approved: Boolean(approved), users: nextUsers, request: foundRequest });
   } catch (error) {
+    console.error('[AccessControl] erro ao aprovar solicitação', error);
     res.status(500).json({ error: error.message || 'Erro ao aprovar solicitação.' });
   }
 });
