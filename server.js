@@ -93,7 +93,14 @@ function getPendingAccessRequests() {
 }
 
 function savePendingAccessRequests(requests) {
-  fs.writeFileSync(accessRequestsFile, JSON.stringify(Array.isArray(requests) ? requests : [], null, 2));
+  const safeRequests = Array.isArray(requests) ? requests : [];
+  fs.mkdirSync(path.dirname(accessRequestsFile), { recursive: true });
+  fs.writeFileSync(accessRequestsFile, JSON.stringify(safeRequests, null, 2));
+  console.log('[AccessControl] salvar pedidos pendentes', {
+    file: accessRequestsFile,
+    total: safeRequests.length,
+    preview: safeRequests.slice(0, 2)
+  });
 }
 
 function getUserByCredentials(email, password = '') {
@@ -736,6 +743,7 @@ app.post('/api/update-access/request', (req, res) => {
 
     pendingRequests.push(nextRequest);
     savePendingAccessRequests(pendingRequests);
+    console.log('[AccessControl] solicitação salva com sucesso', { requestId: nextRequest.id, file: accessRequestsFile });
 
     res.json({ ok: true, request: nextRequest });
   } catch (error) {
@@ -841,9 +849,9 @@ app.post('/update-github', async (req, res) => {
     if (!GITHUB_TOKEN) return res.status(500).json({ error: 'GITHUB_TOKEN not set' });
 
     const accessState = isAccessRequestAllowed(req);
-    if (!accessState.enabled || !accessState.isAuthorized) {
+    if (!accessState.enabled || !accessState.isAuthorized || !accessState.canApprove) {
       return res.status(403).json({
-        error: 'Acesso de atualização negado para este usuário. Faça login com um e-mail autorizado antes de atualizar o SGD.',
+        error: 'Acesso de atualização negado. Apenas usuários com canApprove: true podem atualizar o Excel/SGD.',
         access: accessState
       });
     }
