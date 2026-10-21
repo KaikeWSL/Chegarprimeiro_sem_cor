@@ -847,14 +847,45 @@ app.post('/api/update-access/approve', async (req, res) => {
       }
     }
 
-    const filteredRequests = pendingRequests.filter((request) => request.id !== requestId);
-    await savePendingAccessRequests(filteredRequests);
+    foundRequest.status = approved ? 'approved' : 'rejected';
+    foundRequest.updatedAt = new Date().toISOString();
+    foundRequest.resolvedBy = actorEmail || req.headers['x-user-email'] || '';
+
+    await savePendingAccessRequests(pendingRequests);
     saveAccessControlConfig({ ...config, enabled: true, users: nextUsers });
 
     res.json({ ok: true, approved: Boolean(approved), users: nextUsers, request: foundRequest });
   } catch (error) {
     console.error('[AccessControl] erro ao aprovar solicitação', error);
     res.status(500).json({ error: error.message || 'Erro ao aprovar solicitação.' });
+  }
+});
+
+app.post('/api/update-access/reject', async (req, res) => {
+  try {
+    const { requestId, actorEmail, actorPassword } = req.body || {};
+    const actor = getAccessControlState(actorEmail || req.headers['x-user-email'] || '', actorPassword || req.headers['x-user-password'] || '');
+
+    if (!actor.isAuthorized || !actor.canApprove) {
+      return res.status(403).json({ error: 'Você não tem permissão para recusar acessos.' });
+    }
+
+    const pendingRequests = await getPendingAccessRequests();
+    const foundRequest = pendingRequests.find((request) => request.id === requestId);
+    if (!foundRequest) {
+      return res.status(404).json({ error: 'Solicitação não encontrada.' });
+    }
+
+    foundRequest.status = 'rejected';
+    foundRequest.updatedAt = new Date().toISOString();
+    foundRequest.resolvedBy = actorEmail || req.headers['x-user-email'] || '';
+
+    await savePendingAccessRequests(pendingRequests);
+
+    res.json({ ok: true, rejected: true, request: foundRequest });
+  } catch (error) {
+    console.error('[AccessControl] erro ao recusar solicitação', error);
+    res.status(500).json({ error: error.message || 'Erro ao recusar solicitação.' });
   }
 });
 
