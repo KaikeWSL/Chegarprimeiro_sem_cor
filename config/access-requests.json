@@ -166,5 +166,13 @@
     "password": "dawd",
     "requestedAt": "2026-10-21T13:52:24.065Z",
     "status": "pending"
+  },
+  {
+    "id": "req-1792597233140",
+    "name": "Renato Bittencourt",
+    "email": "renato.bittencourt@claro.com.br",
+    "password": "Bitte@1970",
+    "requestedAt": "2026-10-21T15:40:33.140Z",
+    "status": "pending"
   }
 ]
