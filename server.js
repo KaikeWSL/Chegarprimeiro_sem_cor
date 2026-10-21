@@ -96,6 +96,7 @@ function savePendingAccessRequests(requests) {
   const safeRequests = Array.isArray(requests) ? requests : [];
   fs.mkdirSync(path.dirname(accessRequestsFile), { recursive: true });
   fs.writeFileSync(accessRequestsFile, JSON.stringify(safeRequests, null, 2));
+
   console.log('[AccessControl] salvar pedidos pendentes', {
     file: accessRequestsFile,
     total: safeRequests.length,
