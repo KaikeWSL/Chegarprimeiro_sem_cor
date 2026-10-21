@@ -68,34 +68,66 @@ async function sendEmail({ to, subject, text, html }) {
   const gmailUser = process.env.GMAIL_USER;
   const gmailPassword = process.env.GMAIL_APP_PASSWORD;
 
+  console.log('[AccessControl][Email] iniciando envio', {
+    gmailUser: gmailUser ? `${gmailUser.slice(0, 2)}***@${gmailUser.split('@')[1]}` : null,
+    recipients: Array.isArray(to) ? to : String(to || '').split(',').map((item) => item.trim()).filter(Boolean),
+    subject
+  });
+
   if (!gmailUser || !gmailPassword) {
-    console.warn('[AccessControl] Gmail não configurado. Variáveis GMAIL_USER e GMAIL_APP_PASSWORD ausentes.');
-    return { ok: false, skipped: true };
+    console.warn('[AccessControl][Email] falha: variáveis GMAIL_USER e GMAIL_APP_PASSWORD ausentes.');
+    return { ok: false, skipped: true, reason: 'missing_credentials' };
   }
 
   const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    requireTLS: true,
     auth: {
       user: gmailUser,
       pass: gmailPassword
-    }
+    },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000
   });
 
   const recipients = Array.isArray(to) ? to : String(to || '').split(',').map((item) => item.trim()).filter(Boolean);
   if (!recipients.length) {
-    return { ok: false, skipped: true };
+    console.warn('[AccessControl][Email] falha: lista de destinatários vazia.', { to });
+    return { ok: false, skipped: true, reason: 'empty_recipients' };
   }
 
-  const info = await transporter.sendMail({
-    from: `"Dashboard SGD" <${gmailUser}>`,
-    to: recipients,
-    subject,
-    text,
-    html: html || `<p>${String(text || '').replace(/\n/g, '<br />')}</p>`
-  });
+  try {
+    const info = await transporter.sendMail({
+      from: `"Dashboard SGD" <${gmailUser}>`,
+      to: recipients,
+      subject,
+      text,
+      html: html || `<p>${String(text || '').replace(/\n/g, '<br />')}</p>`
+    });
 
-  console.log('[AccessControl] e-mail enviado com sucesso', { messageId: info.messageId, to: recipients });
-  return { ok: true, messageId: info.messageId };
+    console.log('[AccessControl][Email] enviado com sucesso', {
+      messageId: info.messageId,
+      to: recipients,
+      subject
+    });
+    return { ok: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('[AccessControl][Email] falha ao enviar mensagem', {
+      stage: 'smtp_sendMail',
+      subject,
+      recipients,
+      gmailUser: gmailUser ? `${gmailUser.slice(0, 2)}***@${gmailUser.split('@')[1]}` : null,
+      code: error?.code,
+      name: error?.name,
+      message: error?.message,
+      response: error?.response,
+      stack: error?.stack
+    });
+    return { ok: false, reason: 'smtp_error', error: error?.message || String(error) };
+  }
 }
 
 async function notifyNewAccessRequest(request) {
@@ -105,7 +137,8 @@ async function notifyNewAccessRequest(request) {
     .filter(Boolean);
 
   if (!approvers.length) {
-    return { ok: false, skipped: true };
+    console.warn('[AccessControl][Email] falha ao notificar aprovação: lista APPROVAL_EMAILS vazia.', { raw: process.env.APPROVAL_EMAILS || process.env.GMAIL_APPROVERS || 'admin@empresa.com' });
+    return { ok: false, skipped: true, reason: 'empty_approvers' };
   }
 
   const subject = 'Nova solicitação de acesso ao dashboard';
@@ -128,7 +161,8 @@ async function notifyNewAccessRequest(request) {
 async function notifyAccessDecision(request, decision, actorName = '') {
   const email = request?.email;
   if (!email) {
-    return { ok: false, skipped: true };
+    console.warn('[AccessControl][Email] falha ao notificar decisão: e-mail do solicitante ausente.', { request });
+    return { ok: false, skipped: true, reason: 'missing_request_email' };
   }
 
   const approved = decision === 'approved';
@@ -919,7 +953,13 @@ app.post('/api/update-access/request', async (req, res) => {
     pendingRequests.push(nextRequest);
     await savePendingAccessRequests(pendingRequests);
     await notifyNewAccessRequest(nextRequest).catch((error) => {
-      console.error('[AccessControl] falha ao enviar e-mail de nova solicitação', error?.message || error);
+      console.error('[AccessControl][Email] falha ao enviar e-mail de nova solicitação', {
+        requestId: nextRequest.id,
+        email: nextRequest.email,
+        error: error?.message || String(error),
+        name: error?.name,
+        stack: error?.stack
+      });
     });
     console.log('[AccessControl] solicitação salva com sucesso', { requestId: nextRequest.id, file: 'config/access-requests.json' });
 
@@ -984,7 +1024,15 @@ app.post('/api/update-access/approve', async (req, res) => {
     await savePendingAccessRequests(pendingRequests);
     await saveAccessControlConfig({ ...config, enabled: true, users: nextUsers });
     await notifyAccessDecision(foundRequest, approved ? 'approved' : 'rejected', actorName || actorEmail || 'Administrador').catch((error) => {
-      console.error('[AccessControl] falha ao enviar e-mail de decisão da solicitação', error?.message || error);
+      console.error('[AccessControl][Email] falha ao enviar e-mail de decisão da solicitação', {
+        requestId: foundRequest.id,
+        email: foundRequest.email,
+        decision: approved ? 'approved' : 'rejected',
+        actorName: actorName || actorEmail || 'Administrador',
+        error: error?.message || String(error),
+        name: error?.name,
+        stack: error?.stack
+      });
     });
 
     res.json({ ok: true, approved: Boolean(approved), users: nextUsers, request: foundRequest });
@@ -1015,7 +1063,14 @@ app.post('/api/update-access/reject', async (req, res) => {
 
     await savePendingAccessRequests(pendingRequests);
     await notifyAccessDecision(foundRequest, 'rejected', actorEmail || req.headers['x-user-email'] || 'Administrador').catch((error) => {
-      console.error('[AccessControl] falha ao enviar e-mail de rejeição da solicitação', error?.message || error);
+      console.error('[AccessControl][Email] falha ao enviar e-mail de rejeição da solicitação', {
+        requestId: foundRequest.id,
+        email: foundRequest.email,
+        actorEmail: actorEmail || req.headers['x-user-email'] || 'Administrador',
+        error: error?.message || String(error),
+        name: error?.name,
+        stack: error?.stack
+      });
     });
 
     res.json({ ok: true, rejected: true, request: foundRequest });
