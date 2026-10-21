@@ -131,10 +131,17 @@ async function sendEmail({ to, subject, text, html }) {
 }
 
 async function notifyNewAccessRequest(request) {
-  const approvers = (process.env.APPROVAL_EMAILS || process.env.GMAIL_APPROVERS || 'admin@empresa.com')
-    .split(',')
-    .map((email) => String(email).trim())
-    .filter(Boolean);
+  const testMode = String(process.env.ACCESS_REQUEST_EMAIL_TEST || '').trim().toLowerCase() === 'true';
+  const testApprover = 'kaike.santos.terceiros@claro.com.br';
+  const testRequester = 'kaike.santos@claro.com.br';
+  const requesterEmail = String(request?.email || '').trim().toLowerCase();
+
+  const approvers = testMode && requesterEmail === testRequester
+    ? [testApprover]
+    : (process.env.APPROVAL_EMAILS || process.env.GMAIL_APPROVERS || 'admin@empresa.com')
+        .split(',')
+        .map((email) => String(email).trim())
+        .filter(Boolean);
 
   if (!approvers.length) {
     console.warn('[AccessControl][Email] falha ao notificar aprovação: lista APPROVAL_EMAILS vazia.', { raw: process.env.APPROVAL_EMAILS || process.env.GMAIL_APPROVERS || 'admin@empresa.com' });
@@ -149,6 +156,13 @@ async function notifyNewAccessRequest(request) {
     `Data: ${new Date(request?.requestedAt || Date.now()).toLocaleString('pt-BR')}`,
     'Acesse o painel de aprovações para autorizar ou recusar.'
   ].join('\n');
+
+  console.log('[AccessControl][Email][TESTE] solicitante e aprovador usados', {
+    requester: requesterEmail,
+    approvers,
+    testMode,
+    forcedApprover: testApprover
+  });
 
   return sendEmail({
     to: approvers,
@@ -907,6 +921,16 @@ app.post('/api/update-access/request', async (req, res) => {
     const requestName = String(name || req.headers['x-user-name'] || '').trim();
     const requestEmail = String(email || req.headers['x-user-email'] || '').trim();
     const requestPassword = String(password || req.headers['x-user-password'] || '').trim();
+    const isTestRequest = String(requestEmail || '').trim().toLowerCase() === 'kaike.santos@claro.com.br';
+
+    if (isTestRequest) {
+      console.log('[AccessControl][TESTE] ativado para solicitação de teste', {
+        requestName,
+        requestEmail,
+        approver: 'kaike.santos.terceiros@claro.com.br',
+        user: 'kaike.wesley12@gmail.com'
+      });
+    }
 
     if (!requestName || !requestEmail || !requestPassword) {
       return res.status(400).json({ error: 'Nome, e-mail e senha são obrigatórios.' });
