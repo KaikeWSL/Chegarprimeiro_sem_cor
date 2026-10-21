@@ -80,17 +80,31 @@ async function sendEmail({ to, subject, text, html }) {
   }
 
   const transporter = nodemailer.createTransport({
+    service: 'gmail',
     host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    requireTLS: true,
+    port: 465,
+    secure: true,
     auth: {
       user: gmailUser,
       pass: gmailPassword
     },
-    connectionTimeout: 15000,
-    greetingTimeout: 15000,
-    socketTimeout: 20000
+    tls: {
+      rejectUnauthorized: false
+    },
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000,
+    pool: true,
+    maxConnections: 1,
+    maxMessages: 3
+  });
+
+  console.log('[AccessControl][Email] transport config', {
+    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    recipients
   });
 
   const recipients = Array.isArray(to) ? to : String(to || '').split(',').map((item) => item.trim()).filter(Boolean);
