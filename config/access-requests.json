@@ -1,9 +1,9 @@
 [
   {
     "id": "req-1792604090011",
-    "name": "Rodrigo",
+    "name": "Rodrigo Casquet",
     "email": "rodrigo.casquetmelo@claro.com.br",
-    "password": "Ro",
+    "password": "1234",
     "requestedAt": "2026-10-21T17:34:50.011Z",
     "status": "pending"
   }
