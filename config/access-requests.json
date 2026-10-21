@@ -153,7 +153,9 @@
     "email": "kaike.santos.terceiross@claro.com.br",
     "password": "123",
     "requestedAt": "2026-10-21T13:32:03.200Z",
-    "status": "pending"
+    "status": "rejected",
+    "updatedAt": "2026-10-21T15:42:36.071Z",
+    "resolvedBy": "andre.dasilvarodrigues@claro.com.br"
   },
   {
     "id": "req-1792590017481",
