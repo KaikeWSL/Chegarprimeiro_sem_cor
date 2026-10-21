@@ -198,5 +198,13 @@
     "status": "approved",
     "updatedAt": "2026-10-21T15:42:42.946Z",
     "resolvedBy": "andre.dasilvarodrigues@claro.com.br"
+  },
+  {
+    "id": "req-1792598717152",
+    "name": "teste",
+    "email": "teste111@claro.com.br",
+    "password": "123",
+    "requestedAt": "2026-10-21T16:05:17.152Z",
+    "status": "pending"
   }
 ]
