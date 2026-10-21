@@ -185,7 +185,9 @@
     "email": "awdawd@claro.com.br",
     "password": "dawd",
     "requestedAt": "2026-10-21T13:52:24.065Z",
-    "status": "pending"
+    "status": "rejected",
+    "updatedAt": "2026-10-21T15:45:51.958Z",
+    "resolvedBy": "andre.dasilvarodrigues@claro.com.br"
   },
   {
     "id": "req-1792597233140",
