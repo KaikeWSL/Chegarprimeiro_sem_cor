@@ -189,6 +189,8 @@
     "email": "renato.bittencourt@claro.com.br",
     "password": "Bitte@1970",
     "requestedAt": "2026-10-21T15:40:33.140Z",
-    "status": "pending"
+    "status": "approved",
+    "updatedAt": "2026-10-21T15:42:42.946Z",
+    "resolvedBy": "andre.dasilvarodrigues@claro.com.br"
   }
 ]
