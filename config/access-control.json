@@ -16,6 +16,14 @@
       "authorized": true,
       "canApprove": true,
       "notes": "Usuário com permissão para atualizar o SGD."
+    },
+    {
+      "name": "Renato Bittencourt",
+      "email": "renato.bittencourt@claro.com.br",
+      "password": "Bitte@1970",
+      "authorized": true,
+      "canApprove": false,
+      "notes": "Acesso liberado pela aprovação de um usuário autorizado."
     }
   ]
 }
