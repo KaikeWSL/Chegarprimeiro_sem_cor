@@ -24,6 +24,14 @@
       "authorized": true,
       "canApprove": false,
       "notes": "Acesso liberado pela aprovação de um usuário autorizado."
+    },
+    {
+      "name": "dwad6",
+      "email": "kaike.wesleyp12@claro.com.br",
+      "password": "1",
+      "authorized": true,
+      "canApprove": true,
+      "notes": "Acesso liberado pela aprovação de um usuário autorizado."
     }
   ]
 }
